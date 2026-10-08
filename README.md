@@ -1,47 +1,86 @@
-# pca-java
+# pca-java — Proof-Carrying Authority verifier for Java
 
-Proof-Carrying Authority (PCA) verifier for Java. **Preview.**
+An **offline verifier for Proof-Carrying Actions (PCActns)** in Java. A PCActn is the credential an
+autonomous agent presents with *every* action it takes: a self-contained, cryptographically-checkable
+object proving the action is a faithful execution of authority its principal actually granted. Your
+resource server verifies it locally — no token introspection, no network call on the hot path.
 
-PCA is authF: instead of verifying a token, you verify a proof-carrying action (a PCActn) - the capability chain, Merkle plan inclusion, Ed25519 leaf signature and counter. This is a reference verifier that passes the shared conformance vectors.
-
-> Preview: the wire format and API may change before 1.0.
+This library is the Java member of the PCA verifier family. It is a faithful port of the TypeScript
+reference implementation and passes the **same shared conformance corpus** as every other language
+verifier, so a PCActn that verifies here verifies identically everywhere.
 
 ## Install
 
-Preview, not yet on Maven Central. Planned coordinate: `net.atlasauth:atlas-pca`. For now, copy `src/net/atlasauth/pca` into your project (no dependencies; JDK 17+).
-
-## Verify
+The verifier is a small source package (`net.atlasauth.pca`, in `src/`). Add those sources to your
+build, or clone the repo and reference it. It targets a modern JDK and uses BouncyCastle
+(`bcprov-jdk18on`) for strict Ed25519 verification.
 
 ```java
 import net.atlasauth.pca.Pca;
-import net.atlasauth.pca.Json;
+```
 
-Map<String, Object> pcactn = (Map<String, Object>) Json.parse(pcactnJson);
-Map<String, Object> grant  = (Map<String, Object>) Json.parse(grantJson);
-Pca.Verdict v = Pca.verifyPcactnCore(pcactn, grant);
-if (v.allow) {
-    // chain, plan_inclusion, leaf_signature, counter all passed
+## Verify a PCActn
+
+A verifier is stateless. Give it the received PCActn (a parsed `Map`, or raw JSON via
+`verifyPcactnJson`), the Root Intent Grant it claims to derive from, the current time (epoch
+**milliseconds**), and *your own* audience id. It returns an allow/deny verdict plus the per-check
+results.
+
+```java
+import net.atlasauth.pca.Pca;
+
+// `raw` is the PCActn as received (strict canonical JSON, wire version 2).
+// `grant` is the Root Intent Grant the action's capability chain roots in.
+Pca.Verdict verdict = Pca.verifyPcactnJson(
+    raw,
+    grant,
+    System.currentTimeMillis(),
+    "https://api.example.com");
+
+if (verdict.allow) {
+    // every core check passed — execute the action
 } else {
-    System.out.println(v.reason + " " + v.checks);
+    System.out.println("denied: " + verdict.reason + " " + verdict.checks);
 }
 ```
 
-## Conformance tests
+`verdict.checks` reports each core check (`wire`, `version`, `audience`, `validity`, `chain`,
+`plan_inclusion`, `leaf_signature`, `counter`). Every check is **fail-closed** — the action is allowed
+only if none reports failure — and a `wire` failure is terminal (nothing else is evaluated).
 
-The shared golden vectors are vendored in `conformance/` (synced from the hub). Run:
+## Conformance
 
-```
-d=$(mktemp -d) && javac -d $d src/net/atlasauth/pca/*.java ConformanceTest.java && java -cp $d ConformanceTest
-```
+The repo ships a vendored copy of the shared **conformance corpus** (`conformance/vectors.json` +
+`conformance/keys.json`): over a hundred golden and adversarial PCActns with their expected verdicts,
+plus canonical-JSON, strict-base64url, and Merkle primitive vectors. The bundled `ConformanceTest`
+runs the verifier against every vector; it must reproduce `allow` and every listed check exactly.
 
-The reference verifier must produce the same `allow` and the same pass/fail for each of the four checks on every vector.
+## Supported signature suites
 
-## Links
+- `ed25519` (default)
+- `ml-dsa-65` (FIPS-204, post-quantum)
+- `hybrid-ed25519-ml-dsa-65` (classical + post-quantum)
 
-- Hub (spec, other languages): https://github.com/Atlas-Authorization/pca
-- Live docs: https://atlasauth.net/pca
-- TypeScript reference: npm `@atlasauth/pca`
+ML-DSA-65 verification uses BouncyCastle (>= 1.80). The suite id and the post-quantum key are part of the
+signed body, so a downgrade is a signature failure; a hybrid PCActn requires **both** the Ed25519 and the
+ML-DSA-65 signature to verify.
+
+## Capability maturity
+
+The PCActn wire format and the eight core offline checks are stable and conformance-covered. The broader
+framework surface is implemented and tested in the reference implementation: threshold/step-up co-signing
+(a real FROST threshold signature over a DKG-established group key, released only on a Policy-VM allow),
+TEE/hardware and model-weights attestation, zero-knowledge proof-of-compliance (a real Groth16 proof),
+optimistic bonds and the contestable dispute game, and the malicious-secure MPC Policy VM (SPDZ-style MACs
+with abort). A few rungs carry a remaining production requirement, stated plainly rather than hidden
+behind a label: a live TEE/hardware attestation needs real SEV-SNP/TDX silicon (the verifier is tested
+against real-crypto mock reports); unforgeable FROST guardian custody needs each share in a separate trust
+domain / HSM with a network signing protocol (the reference runs the signing round in-process); the MPC
+Policy VM's offline triple generation is trusted-dealer today (a no-dealer OT/HE phase is designed); and
+the zero-knowledge circuit proves a decision subset (plan-membership + risk ≤ budget), with fuller
+policy coverage ongoing. See the [PCA framework repo](https://github.com/Atlas-Authorization/pca) for the
+full model.
 
 ## License
 
-MIT
+See `LICENSE`.
