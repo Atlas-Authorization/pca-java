@@ -549,6 +549,17 @@ public final class Pca {
             else why = verifyChain(chain, asStr(grant.get("issuer")), grant.get("issuer") instanceof String);
             if (why.isEmpty()) v.checks.put("chain", true); else v.fail("chain", why);
 
+            // grant_ref_bound (normative): the signed grant_ref MUST be a non-empty string byte-equal to the id of the
+            // ROOT capability of the presented chain (cap_chain[0].id). Independent of the chain verdict; fail-closed
+            // on an empty / malformed chain. Replay state is keyed on grant_ref, so it must not be attacker-chosen.
+            Object gref = p.get("grant_ref");
+            Object rootId = !chain.isEmpty() && chain.get(0) instanceof Map ? ((Map<?, ?>) chain.get(0)).get("id") : null;
+            if (gref instanceof String && !((String) gref).isEmpty() && rootId instanceof String && gref.equals(rootId)) {
+                v.checks.put("grant_ref_bound", true);
+            } else {
+                v.fail("grant_ref_bound", "grant_ref is not the id of the root capability in cap_chain");
+            }
+
             // plan inclusion (leaf recomputed from the action itself)
             Map<String, Object> plan = asMap(p.get("plan"));
             Map<String, Object> action = asMap(p.get("action"));
@@ -581,7 +592,7 @@ public final class Pca {
         }
         // any check not reached (internal error) is a failure; keep normative key order
         Map<String, Boolean> ordered = new LinkedHashMap<>();
-        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "plan_inclusion", "leaf_signature", "counter"})
+        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter"})
             ordered.put(k, Boolean.TRUE.equals(v.checks.get(k)));
         v.checks.clear();
         v.checks.putAll(ordered);
