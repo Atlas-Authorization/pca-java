@@ -1,0 +1,59 @@
+name: CI
+
+# Maven build + JUnit suites, and the JUnit-free conformance runner over the shared corpus (conformance/vectors.json).
+on:
+  push:
+    branches: [main, 'ci/**']
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BC_VERSION: '1.80'
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / JDK ${{ matrix.java }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        java: ['17', '21']
+        include:
+          - { os: windows-latest, java: '21' }
+          - { os: macos-latest, java: '21' }
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      # SnapshotTest/MutationHarness locate the full adversarial set and the mutation-oracle inputs by the source layout
+      # (../../tools/pca-audit from the repo): rebuild it from the flagship at the same ref and test there
+      - name: Source layout (full shared corpus from the flagship)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - name: Build + unit tests
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp test
+      - name: Conformance corpus
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          mvn -B -ntp -q dependency:copy -Dartifact=org.bouncycastle:bcprov-jdk18on:${BC_VERSION} -DoutputDirectory=.ci
+          BC=".ci/bcprov-jdk18on-${BC_VERSION}.jar"
+          SEP=':'; [ "$RUNNER_OS" = Windows ] && SEP=';'
+          mkdir -p .ci/out
+          javac -cp "$BC" -d .ci/out src/net/atlasauth/pca/*.java ConformanceTest.java
+          java -Xss8m -cp ".ci/out${SEP}${BC}" ConformanceTest
