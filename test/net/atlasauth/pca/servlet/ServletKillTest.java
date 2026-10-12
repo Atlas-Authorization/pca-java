@@ -137,15 +137,21 @@ public class ServletKillTest {
         PcaResult r = PcaCore.authorize(null, null, aud, now, res);
         assertEquals(PcaResult.Outcome.ABSENT, r.outcome());
         assertEquals("no PCA-Action header and no PCActn body", r.detail());
-        assertEquals(PcaResult.Outcome.ABSENT, PcaCore.authorize("  ", new byte[0], aud, now, res).outcome());
+        // 0.4.1: only an absent or EMPTY header is "no header"; a whitespace-only value is present and not strict base64url
+        assertEquals(PcaResult.Outcome.UNDECODABLE, PcaCore.authorize("  ", new byte[0], aud, now, res).outcome());
+        assertEquals(PcaResult.Outcome.ABSENT, PcaCore.authorize("", new byte[0], aud, now, res).outcome());
         assertEquals("no PCA-Action header and no PCActn body", PcaCore.authorize("", new byte[0], aud, now, res).detail());
         assertEquals("PCA-Action is not canonical base64url", PcaCore.authorize("!!", null, aud, now, res).detail());
         assertEquals(PcaResult.Outcome.UNDECODABLE, PcaCore.authorize("!!", null, aud, now, res).outcome());
         r = PcaCore.authorize(hdr("{"), null, aud, now, res);
         assertEquals(PcaResult.Outcome.UNDECODABLE, r.outcome());
         assertEquals("PCActn is not strict JSON: expected key at 1", r.detail());
-        // header wins over body, and surrounding whitespace is tolerated
+        // 0.4.1: surrounding whitespace is NOT tolerated (strict header: nothing is trimmed), and the body is not consulted
         r = PcaCore.authorize("  " + hdr(json) + " \n", "garbage".getBytes(), aud, now, res);
+        assertEquals(PcaResult.Outcome.UNDECODABLE, r.outcome());
+        assertEquals("PCA-Action is not canonical base64url", r.detail());
+        // header wins over body
+        r = PcaCore.authorize(hdr(json), "garbage".getBytes(), aud, now, res);
         assertTrue(r.allowed(), r.detail());
         assertNotNull(r.verdict()); assertTrue(r.verdict().allow);
         assertTrue(r.pcactn() instanceof Map);
@@ -156,6 +162,8 @@ public class ServletKillTest {
         r = PcaCore.authorize(null, body, aud, now, res);
         assertTrue(r.allowed(), r.detail());
         r = PcaCore.authorize("   ", body, aud, now, res);
+        assertEquals(PcaResult.Outcome.UNDECODABLE, r.outcome()); // 0.4.1: a whitespace-only header is present, not absent
+        r = PcaCore.authorize("", body, aud, now, res);
         assertTrue(r.allowed(), r.detail());
         r = PcaCore.authorize(null, "{".getBytes(), aud, now, res);
         assertEquals(PcaResult.Outcome.UNDECODABLE, r.outcome());
@@ -261,7 +269,7 @@ public class ServletKillTest {
         init();
         PcaFilter f = new PcaFilter(aud, resolver(), clock);
         byte[] body = ("{\"pcactn\":" + json + "}").getBytes(StandardCharsets.UTF_8);
-        for (String blank : new String[] {null, "", "   "}) {
+        for (String blank : new String[] {null, ""}) {
             MockHttpServletRequest req = new MockHttpServletRequest();
             if (blank != null) req.addHeader("PCA-Action", blank);
             req.setContent(body);
@@ -292,6 +300,18 @@ public class ServletKillTest {
             assertArrayEquals(body, down.getInputStream().readAllBytes());
             BufferedReader rd = down.getReader();
             assertEquals(new String(body, StandardCharsets.UTF_8), rd.lines().collect(java.util.stream.Collectors.joining("\n")));
+        }
+        // 0.4.1: a whitespace-only header is PRESENT (not trimmed): 401 not-base64url, the body is not consulted
+        {
+            MockHttpServletRequest req = new MockHttpServletRequest();
+            req.addHeader("PCA-Action", "   ");
+            req.setContent(body);
+            MockHttpServletResponse resp = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+            f.doFilter(req, resp, chain);
+            assertNull(chain.getRequest());
+            assertEquals(401, resp.getStatus());
+            assertTrue(resp.getContentAsString().contains("not canonical base64url"), resp.getContentAsString());
         }
         // reader honours the declared encoding, falls back to UTF-8 for unknown names
         MockHttpServletRequest req = new MockHttpServletRequest();

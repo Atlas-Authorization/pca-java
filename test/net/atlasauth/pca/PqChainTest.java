@@ -158,9 +158,11 @@ public class PqChainTest {
         byte[] msg = Threshold.shareMessage("agent", tm, set, 1, null, false);
         Map<String, Object> share = PcaUnitTest.map("role", "agent", "publicKey", edPub, "sig", edSign("agent", msg));
         assertTrue(Threshold.verifyShare("agent", tm, set, 1, share));
-        // explicit ed25519 alg and a stray pq_pk are accepted/ignored
-        Map<String, Object> explicit = new LinkedHashMap<>(share); explicit.put("alg", "ed25519"); explicit.put("pq_pk", "ignored");
+        // explicit ed25519 alg is accepted; a pq_pk naming a key its role does not register is refused (any suite, d00dba73)
+        Map<String, Object> explicit = new LinkedHashMap<>(share); explicit.put("alg", "ed25519");
         assertTrue(Threshold.verifyShare("agent", tm, set, 1, explicit));
+        explicit.put("pq_pk", "ignored");
+        assertFalse(Threshold.verifyShare("agent", tm, set, 1, explicit));
         // R6-03: a share without a string role is malformed (reference wellFormed), refused
         Map<String, Object> noRole = new LinkedHashMap<>(share); noRole.remove("role");
         assertFalse(Threshold.verifyShare("agent", tm, set, 1, noRole));

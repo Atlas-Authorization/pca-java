@@ -138,6 +138,31 @@ public final class Pq {
         return null;
     }
 
+    /**
+     * 0.4.1: wire-shape validation of ONE threshold share's signature fields, per suite (it used to be a fixed 64-byte
+     * {@code sig}, so a pure post-quantum share could never be carried). Mirrors {@code validateShareSignatureWire} in
+     * packages/pca/src/pq.ts: {@code alg} absent == ed25519; present and not a string (JSON null included) or unknown
+     * fails; {@code sig} must be canonical base64url of the suite's signature length; {@code pq_sig} is required (3309
+     * bytes) for the hybrid and must be absent otherwise. A share's {@code pq_pk} is NOT judged here: it is an optional
+     * echo that {@link Threshold} checks against the signer set. Returns null when well-formed, else a short reason.
+     */
+    static String validateShareSignatureWire(Map<String, Object> s) {
+        boolean algPresent = s.containsKey("alg");
+        Object algV = s.get("alg");
+        if (algPresent && !(algV instanceof String)) return "'alg' must be a string";
+        Suite suite = resolveSigAlg(algV, algPresent);
+        if (suite == null) return "unknown signature alg '" + String.valueOf(algV) + "'";
+        if (Pca.decodeB64uStrict(s.get("sig"), suite.sigBytes) == null)
+            return "'sig' is not canonical base64url (" + suite.sigBytes + " bytes) for alg '" + suite.alg + "'";
+        if (suite.needsPqSig) {
+            if (Pca.decodeB64uStrict(s.get("pq_sig"), ML_DSA_65_SIGNATURE_BYTES) == null)
+                return "'pq_sig' is not canonical base64url (" + ML_DSA_65_SIGNATURE_BYTES + " bytes) for alg '" + suite.alg + "'";
+        } else if (s.containsKey("pq_sig")) {
+            return "'pq_sig' must be absent for alg '" + suite.alg + "'";
+        }
+        return null;
+    }
+
     // ---- the leaf signature SEAM ------------------------------------------------------------
 
     /**

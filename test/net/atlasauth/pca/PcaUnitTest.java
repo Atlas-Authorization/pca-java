@@ -750,7 +750,7 @@ public class PcaUnitTest {
         p = valid(); p.put("threshold", map("shares", new ArrayList<>(List.of(good, map("role", "x")))));
         assertEquals("threshold.shares[1].publicKey is not canonical base64url (32 bytes)", Pca.validateWireV2(p));
         p = valid(); p.put("threshold", map("shares", new ArrayList<>(List.of(good, map("role", "x", "publicKey", B32)))));
-        assertEquals("threshold.shares[1].sig is not canonical base64url (64 bytes)", Pca.validateWireV2(p));
+        assertEquals("threshold.shares[1]: 'sig' is not canonical base64url (64 bytes) for alg 'ed25519'", Pca.validateWireV2(p));
         p = valid(); p.put("threshold", map("shares", new ArrayList<>(List.of(map("role", "x", "publicKey", "bad", "sig", B64), good))));
         assertEquals("threshold.shares[0].publicKey is not canonical base64url (32 bytes)", Pca.validateWireV2(p));
     }

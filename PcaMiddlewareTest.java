@@ -15,6 +15,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 import net.atlasauth.pca.Json;
 import net.atlasauth.pca.servlet.GrantResolver;
+import net.atlasauth.pca.servlet.PcaCore;
 import net.atlasauth.pca.servlet.PcaFilter;
 import net.atlasauth.pca.servlet.PcaResult;
 import net.atlasauth.pca.spring.PcaInterceptor;
@@ -176,6 +177,44 @@ public class PcaMiddlewareTest {
             boolean proceed2 = bad.preHandle(req2, resp2, new Object());
             check(!proceed2 && resp2.getStatus() == 403, "interceptor wrong audience: 403 + preHandle false");
             System.out.println("PASS spring-interceptor");
+        }
+
+        // --- Test 7 (0.4.1): the PCA-Action header is STRICT unpadded base64url of UTF-8 text (primitives.pca_header) ---
+        {
+            int ran = 0;
+            for (Object x : (java.util.List<Object>) ((Map<String, Object>) doc.get("primitives")).get("pca_header")) {
+                Map<String, Object> e = (Map<String, Object>) x;
+                String in = (String) e.get("input");
+                PcaResult r = PcaCore.authorize(in, null, aud, now, resolver);
+                String nm = "pca_header " + e.get("name");
+                if (in.isEmpty()) {
+                    check(!r.allowed() && r.status() == 401, nm + ": empty header must not authorize");
+                } else if (Boolean.TRUE.equals(e.get("valid"))) {
+                    check(!(r.outcome() == PcaResult.Outcome.UNDECODABLE && r.detail().contains("base64url")),
+                        nm + ": a strict header must decode, got " + r.outcome() + " " + r.detail());
+                } else {
+                    check(r.outcome() == PcaResult.Outcome.UNDECODABLE && r.detail().contains("base64url"),
+                        nm + ": must be refused as not base64url, got " + r.outcome() + " " + r.detail());
+                }
+                ran++;
+            }
+            check(ran >= 27, "pca_header vectors present (" + ran + ")");
+
+            // a genuine PCActn header is refused once it carries whitespace or padding (nothing is trimmed or normalized)
+            String good = header(pcactnJson);
+            for (String bad : new String[] {good + " ", " " + good, good + "\t", good + "=", good.replace('-', '+').replace('_', '/'), "   "}) {
+                PcaFilter filter = new PcaFilter(aud, resolver, clock);
+                MockHttpServletRequest req = new MockHttpServletRequest();
+                req.addHeader("PCA-Action", bad);
+                MockHttpServletResponse resp = new MockHttpServletResponse();
+                MockFilterChain chain = new MockFilterChain();
+                filter.doFilter(req, resp, chain);
+                check(chain.getRequest() == null && resp.getStatus() == 401 && resp.getContentAsString().contains("base64url"),
+                    "non-strict header '" + bad.replace(good, "<pcactn>") + "': expected 401 not-base64url, was " + resp.getStatus() + " " + resp.getContentAsString());
+            }
+            // still allowed when strict
+            check(PcaCore.authorize(good, null, aud, now, resolver).allowed(), "strict header still authorizes");
+            System.out.println("PASS strict-pca-action-header");
         }
 
         System.out.println(checks + " assertions, " + fails + " failures");

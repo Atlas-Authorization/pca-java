@@ -71,7 +71,7 @@ public final class PcaFilter implements Filter {
         String header = req.getHeader(PcaCore.HEADER);
         byte[] body = null;
         HttpServletRequest downstream = req;
-        if (header == null || header.isBlank()) {
+        if (header == null || header.isEmpty()) {
             // Only consume the body when we must; buffer it so downstream can read it again.
             body = req.getInputStream().readAllBytes();
             downstream = new CachedBodyHttpServletRequest(req, body);

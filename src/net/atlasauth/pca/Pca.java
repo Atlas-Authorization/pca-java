@@ -98,6 +98,27 @@ public final class Pca {
         return b;
     }
 
+    /**
+     * 0.4.1: decode a {@code PCA-Action} header value to the PCActn JSON text, STRICTLY (mirrors {@code decodePcaHeader} in
+     * packages/pca/src/adapters.ts): the value must be non-empty, unpadded base64url ({@code A-Z a-z 0-9 - _} only, no
+     * {@code =}, no whitespace anywhere: nothing is trimmed), length mod 4 != 1, zero unused trailing bits, and the bytes
+     * must be well-formed UTF-8 (no overlong forms, no encoded surrogates, no truncated sequence; a leading BOM is kept, so
+     * the strict JSON parser refuses it). One PCActn has exactly one header spelling. Returns null when invalid; never throws.
+     */
+    public static String decodePcaHeader(String value) {
+        if (value == null || value.isEmpty()) return null;
+        byte[] raw = decodeB64uStrict(value, -1);
+        if (raw == null) return null;
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(raw)).toString();
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return null;
+        }
+    }
+
     static byte[] sha(byte[]... parts) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -600,7 +621,9 @@ public final class Pca {
                     if (!isObj(shares.get(i)) || !isStr(((Map<String, Object>) shares.get(i)).get("role"))) return "threshold.shares[" + i + "] is malformed";
                     Map<String, Object> sh = (Map<String, Object>) shares.get(i);
                     if (decodeB64uStrict(sh.get("publicKey"), 32) == null) return "threshold.shares[" + i + "].publicKey is not canonical base64url (32 bytes)";
-                    if (decodeB64uStrict(sh.get("sig"), 64) == null) return "threshold.shares[" + i + "].sig is not canonical base64url (64 bytes)";
+                    // 0.4.1: the share signature is validated PER SUITE (alg absent == ed25519: 64-byte sig, no pq_sig).
+                    String shareErr = Pq.validateShareSignatureWire(sh);
+                    if (shareErr != null) return "threshold.shares[" + i + "]: " + shareErr;
                 }
             }
             return null;

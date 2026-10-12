@@ -1,3 +1,4 @@
+import net.atlasauth.pca.Caveats;
 import net.atlasauth.pca.Json;
 import net.atlasauth.pca.Pca;
 import net.atlasauth.pca.Pq;
@@ -150,6 +151,9 @@ public class ConformanceTest {
             String unsupported = null;
             for (String s : suites)
                 if (ALL_REGISTERED_SUITES.contains(s) && !IMPLEMENTED_SUITES.contains(s)) { unsupported = s; break; }
+            // 0.4.1: a vector may name the suite it needs in `requires` (e.g. a threshold share under ml-dsa-87).
+            if (unsupported == null && v.get("requires") instanceof String && ALL_REGISTERED_SUITES.contains((String) v.get("requires"))
+                && !IMPLEMENTED_SUITES.contains((String) v.get("requires"))) unsupported = (String) v.get("requires");
             if (unsupported != null) {
                 skipped++;
                 skipBySuite.merge(unsupported, 1, Integer::sum);
@@ -364,6 +368,34 @@ public class ConformanceTest {
         }
         check(depthRan >= 20, "depth primitives present (" + depthRan + ")");
         System.out.println("DEPTH: " + depthRan + " run");
+
+        // ---- 0.4.1: policy-layer caveats (root caveats included) and the strict PCA-Action header ----------------
+        int caveatRan = 0;
+        for (Object x : (List<Object>) prim.get("caveat_eval")) {
+            Map<String, Object> e = (Map<String, Object>) x;
+            Map<String, Object> exp = (Map<String, Object>) e.get("expect");
+            Caveats.Result r;
+            try { r = Caveats.evaluateCaveats(Caveats.policyCaveats(e.get("grant"), e.get("chain")), e.get("context")); }
+            catch (Throwable th) { check(false, "caveat_eval " + e.get("name") + ": THREW " + th); continue; }
+            check(Boolean.valueOf(r.ok).equals(exp.get("allow")), "caveat_eval " + e.get("name") + ": allow=" + r.ok + " want " + exp.get("allow") + " " + r.failed);
+            check(r.failed.equals(exp.get("failed")), "caveat_eval " + e.get("name") + ": failed=" + r.failed + " want " + exp.get("failed"));
+            caveatRan++;
+        }
+        check(caveatRan >= 40, "caveat_eval primitives present (" + caveatRan + ")");
+        System.out.println("CAVEAT_EVAL: " + caveatRan + " run");
+        int headerRan = 0;
+        for (Object x : (List<Object>) prim.get("pca_header")) {
+            Map<String, Object> e = (Map<String, Object>) x;
+            boolean want = Boolean.TRUE.equals(e.get("valid"));
+            String got;
+            try { got = Pca.decodePcaHeader((String) e.get("input")); }
+            catch (Throwable th) { check(false, "pca_header " + e.get("name") + ": THREW " + th); continue; }
+            check((got != null) == want, "pca_header " + e.get("name") + ": valid=" + (got != null) + " want " + want);
+            if (got != null && want) check(got.equals(e.get("text")), "pca_header " + e.get("name") + ": text mismatch");
+            headerRan++;
+        }
+        check(headerRan >= 27, "pca_header primitives present (" + headerRan + ")");
+        System.out.println("PCA_HEADER: " + headerRan + " run");
 
         // ---- report ------------------------------------------------------------------------------------------
         System.out.println();

@@ -24,20 +24,22 @@ public final class PcaCore {
      * Authorize one request. Exactly one PCActn source is consulted: the {@code pcaHeader} when present, otherwise
      * the JSON {@code body} (expected shape {@code {"pcactn": <PCActn>}}). Never throws.
      *
-     * @param pcaHeader the raw {@code PCA-Action} header value, or {@code null}/blank if absent
+     * @param pcaHeader the raw {@code PCA-Action} header value, or {@code null}/empty if absent (a whitespace-only value is
+     *                  present and refused: it is not strict base64url)
      * @param body      the request body bytes (only read when the header is absent), or {@code null}
      * @param audience  this resource server's audience; matched against the signed {@code aud}
      * @param now       current time in epoch milliseconds (from the configured clock)
      * @param resolver  maps the PCActn's {@code grant_ref} to its root capability
      */
     public static PcaResult authorize(String pcaHeader, byte[] body, String audience, long now, GrantResolver resolver) {
-        if (pcaHeader != null && !pcaHeader.isBlank()) {
-            // Header transport: base64url -> UTF-8 JSON text -> strict decode inside the verifier.
-            byte[] raw = Pca.decodeB64uStrict(pcaHeader.trim(), -1);
-            if (raw == null) return PcaResult.of(PcaResult.Outcome.UNDECODABLE, HEADER + " is not canonical base64url");
+        if (pcaHeader != null && !pcaHeader.isEmpty()) {
+            // Header transport: STRICT unpadded base64url -> STRICT UTF-8 JSON text -> strict decode inside the verifier
+            // (0.4.1: nothing is trimmed or normalized; whitespace, padding, the standard alphabet or invalid UTF-8 => 401).
+            String text = Pca.decodePcaHeader(pcaHeader);
+            if (text == null) return PcaResult.of(PcaResult.Outcome.UNDECODABLE, HEADER + " is not canonical base64url");
             Object parsed;
             try {
-                parsed = Json.parse(new String(raw, StandardCharsets.UTF_8));
+                parsed = Json.parse(text);
             } catch (RuntimeException e) {
                 return PcaResult.of(PcaResult.Outcome.UNDECODABLE, "PCActn is not strict JSON: " + e.getMessage());
             }
