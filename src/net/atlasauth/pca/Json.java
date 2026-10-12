@@ -18,12 +18,18 @@ import java.util.regex.Pattern;
  * non-JSON whitespace, duplicate keys (after unescaping), lone surrogates (raw or escaped), raw control characters
  * in strings, unknown escapes, nesting deeper than {@link #MAX_DEPTH}, input longer than {@link #MAX_CHARS}
  * UTF-8 bytes, and any number not in the canonical wire form (see {@link #numberError}).
- * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files).
+ * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files): it has no depth cap.
  */
 public final class Json {
     private Json() {}
 
     public static final int MAX_DEPTH = 32;
+    /**
+     * Nesting cap of the LENIENT canonical form (a public helper only: every protocol digest uses the strict form, capped
+     * at MAX_DEPTH). Without it a deep value (or a cycle) overflowed the stack and the StackOverflowError escaped the caller.
+     * Same value as the .NET LenientMaxDepth.
+     */
+    public static final int MAX_LENIENT_DEPTH = 512;
     public static final int MAX_CHARS = 1 << 20;
     public static final int MAX_DECIMAL_DIGITS = 15;
     private static final BigInteger MAX_SAFE = BigInteger.valueOf(9007199254740991L);
@@ -70,7 +76,7 @@ public final class Json {
             return numberError(r) == null && r.indexOf('.') < 0;
         }
         if (o instanceof Integer) return true;
-        if (o instanceof Long) { long l = (Long) o; return Math.abs(l) <= 9007199254740991L; }
+        if (o instanceof Long) { long l = (Long) o; return l >= -9007199254740991L && l <= 9007199254740991L; } // not Math.abs: abs(Long.MIN_VALUE) is negative
         return false;
     }
 
@@ -268,7 +274,7 @@ public final class Json {
     }
 
     // ---- canonical serializers ----
-    /** LENIENT canonical form (content addressing: capabilities, Merkle leaves). Keys in UTF-8 bytewise order. */
+    /** LENIENT canonical form (a public helper; protocol digests use {@link #canonicalizeStrict}). Keys in UTF-8 bytewise order. */
     public static String canonicalize(Object v) {
         StringBuilder sb = new StringBuilder();
         ser(sb, v, false, 1);
@@ -346,7 +352,7 @@ public final class Json {
             if (strict && !isSafeInt(v)) throw new IllegalArgumentException("canonicalize: integer outside the safe range");
             sb.append(v.toString());
         } else if (v instanceof List) {
-            if (strict && depth > MAX_DEPTH) throw new IllegalArgumentException("canonicalize: nesting too deep");
+            if (depth > (strict ? MAX_DEPTH : MAX_LENIENT_DEPTH)) throw new IllegalArgumentException("canonicalize: nesting too deep");
             sb.append('[');
             boolean first = true;
             for (Object x : (List<Object>) v) {
@@ -356,7 +362,7 @@ public final class Json {
             }
             sb.append(']');
         } else if (v instanceof Map) {
-            if (strict && depth > MAX_DEPTH) throw new IllegalArgumentException("canonicalize: nesting too deep");
+            if (depth > (strict ? MAX_DEPTH : MAX_LENIENT_DEPTH)) throw new IllegalArgumentException("canonicalize: nesting too deep");
             Map<String, Object> m = (Map<String, Object>) v;
             List<String> keys = new ArrayList<>(m.keySet());
             keys.sort(Json::compareUtf8);

@@ -54,6 +54,52 @@ public class ConformanceTest {
 
     static String str(Object o) { return o instanceof String ? (String) o : ""; }
 
+    /** primitives.depth `expand`: the marker string (value) / substring (text) becomes `levels` nested arrays around `leaf`, built iteratively. */
+    @SuppressWarnings("unchecked")
+    static Object expandDepthInput(String api, Object input, Map<String, Object> ex) {
+        if (ex == null) return input;
+        String marker = (String) ex.get("marker");
+        int levels = (int) Json.asLong(ex.get("levels"));
+        Object leaf = ex.get("leaf");
+        if (api.equals("pcactn_json") || api.equals("json_parse")) {
+            Map<String, Object> i = new java.util.LinkedHashMap<>((Map<String, Object>) input);
+            String text = (String) i.get("text");
+            int at = text.indexOf(marker);
+            i.put("text", text.substring(0, at) + "[".repeat(levels) + Json.canonicalize(leaf) + "]".repeat(levels) + text.substring(at + marker.length()));
+            return i;
+        }
+        Object nest = leaf;
+        for (int k = 0; k < levels; k++) { List<Object> l = new java.util.ArrayList<>(); l.add(nest); nest = l; }
+        java.util.ArrayDeque<Object> st = new java.util.ArrayDeque<>();
+        st.push(input);
+        while (!st.isEmpty()) { // the input itself is shallow; replace the single marker value in place
+            Object o = st.pop();
+            if (o instanceof Map) for (Map.Entry<String, Object> e : ((Map<String, Object>) o).entrySet()) {
+                if (marker.equals(e.getValue())) e.setValue(nest); else st.push(e.getValue());
+            } else if (o instanceof List) { List<Object> l = (List<Object>) o; for (int k = 0; k < l.size(); k++) { if (marker.equals(l.get(k))) l.set(k, nest); else st.push(l.get(k)); } }
+        }
+        return input;
+    }
+
+    /** primitives.depth verdict per api (true == accepted / verifies / counts / parses). */
+    @SuppressWarnings("unchecked")
+    static boolean depthVerdict(String api, Object in) {
+        switch (api) {
+            case "chain": {
+                Map<String, Object> i = (Map<String, Object>) in;
+                return Pca.verifyChain((List<Object>) i.get("chain"), (String) i.get("expected_root_issuer"), true, null).isEmpty();
+            }
+            case "threshold_share": return Threshold.verifyShareEntry(in);
+            case "pcactn_json": {
+                Map<String, Object> i = (Map<String, Object>) in;
+                return Pca.verifyPcactnJson((String) i.get("text"), (Map<String, Object>) i.get("grant"), Json.asLong(i.get("now")), (String) i.get("aud")).allow;
+            }
+            case "json_parse":
+                try { Json.parse((String) ((Map<String, Object>) in).get("text")); return true; } catch (IllegalArgumentException e) { return false; }
+            default: throw new IllegalStateException("unknown depth api " + api);
+        }
+    }
+
     /** Raw bytes of a base64url string of arbitrary length; throws (fail-closed) on a malformed input. */
     static byte[] b64uBytes(Object o) {
         byte[] b = Pca.decodeB64uStrict(o, -1);
@@ -85,6 +131,7 @@ public class ConformanceTest {
 
     @SuppressWarnings("unchecked")
     public static void main(String[] args) throws Exception {
+        fails = 0; checks = 0;
         Map<String, Object> doc = load("vectors.json");
         check(Json.asLong(doc.get("format")) == 2 && Json.asLong(doc.get("ver")) == 2, "format-2 vectors");
         check("2.1".equals(doc.get("agent_leaf_binding")), "agent_leaf_binding == 2.1");
@@ -112,12 +159,17 @@ public class ConformanceTest {
 
             int before = fails;
             Map<String, Object> ctx = (Map<String, Object>) v.get("context");
+            java.util.List<String> allowedSuites = null;
+            if (ctx.get("allowed_suites") instanceof java.util.List) {
+                allowedSuites = new java.util.ArrayList<>();
+                for (Object o : (java.util.List<Object>) ctx.get("allowed_suites")) allowedSuites.add(String.valueOf(o));
+            }
             long now = Json.asLong(ctx.get("now"));
             String aud = (String) ctx.get("aud");
             Map<String, Object> grant = (Map<String, Object>) v.get("grant");
             Pca.Verdict got = v.containsKey("pcactn_json")
-                ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud)
-                : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud);
+                ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud, allowedSuites)
+                : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud, allowedSuites);
             Map<String, Object> exp = (Map<String, Object>) v.get("expect");
             boolean wantAllow = (Boolean) exp.get("allow");
             check(got.allow == wantAllow, v.get("name") + ": allow=" + got.allow + " want " + wantAllow + " (" + got.reason + ")");
@@ -225,6 +277,94 @@ public class ConformanceTest {
             artRan++;
         }
 
+        // ---- R4-01: standalone chain verification with verifier-side PQ authority (primitives.chain_pin) ---------
+        int pinRan = 0, pinSkipped = 0;
+        for (Object x : (List<Object>) prim.get("chain_pin")) {
+            Map<String, Object> cv = (Map<String, Object>) x;
+            Map<String, Object> ex = (Map<String, Object>) cv.get("expect");
+            boolean wantOk = Boolean.TRUE.equals(ex.get("ok"));
+            String wantReason = ex.get("reason") instanceof String ? (String) ex.get("reason") : null;
+            boolean pinReason = wantReason != null && wantReason.startsWith("hop 0: root suite");
+            Set<String> need = new LinkedHashSet<>();
+            for (Object ho : (List<Object>) cv.get("chain")) if (ho instanceof Map && ((Map<String, Object>) ho).get("alg") instanceof String) need.add((String) ((Map<String, Object>) ho).get("alg"));
+            if (!pinReason && !IMPLEMENTED_SUITES.containsAll(need)) { pinSkipped++; continue; }
+            List<String> allowed = null;
+            if (cv.get("allowed_suites") instanceof List) { allowed = new java.util.ArrayList<>(); for (Object o : (List<Object>) cv.get("allowed_suites")) allowed.add(String.valueOf(o)); }
+            String why;
+            try {
+                why = Pca.verifyChain((List<Object>) cv.get("chain"), (String) cv.get("expected_root_issuer"), cv.get("expected_root_issuer") instanceof String,
+                    allowed, (Map<String, Object>) cv.get("pq_pins"), (Map<String, Object>) cv.get("trusted_root"));
+            } catch (RuntimeException ex2) { why = "exception: " + ex2; }
+            check(why.isEmpty() == wantOk, "chain_pin " + cv.get("name") + ": ok=" + why.isEmpty() + " want " + wantOk + (why.isEmpty() ? "" : " (" + why + ")"));
+            if (pinReason) check(wantReason.equals(why), "chain_pin " + cv.get("name") + ": exact hop 0 pin reason");
+            pinRan++;
+        }
+        check(pinRan + pinSkipped >= 25, "chain_pin: at least 25 vectors present (" + (pinRan + pinSkipped) + ")");
+
+        // ---- round 6: whole signer-set validation, signer-set hash, malformed input (gen-conformance-r6.mjs) -------
+        int tsRan = 0, tsSkipped = 0, malformedRan = 0;
+        for (Object x : (List<Object>) prim.get("threshold_set")) {
+            Map<String, Object> e = (Map<String, Object>) x;
+            if (e.get("requires") instanceof String && !IMPLEMENTED_SUITES.contains((String) e.get("requires"))) { tsSkipped++; continue; }
+            boolean want = Boolean.TRUE.equals(e.get("valid"));
+            boolean got;
+            try { got = Threshold.verifyShareEntry(e); } catch (Throwable th) { check(false, "threshold_set " + e.get("name") + ": THREW " + th); continue; }
+            check(got == want, "threshold_set " + e.get("name") + ": verify=" + got + " want " + want);
+            tsRan++;
+        }
+        for (Object x : (List<Object>) prim.get("signer_set_hash")) {
+            Map<String, Object> e = (Map<String, Object>) x;
+            String h = Threshold.signerSetHashB64u(e.get("signer_set"));
+            check(String.valueOf(e.get("hash")).equals(h), "signer_set_hash " + e.get("name") + ": got " + h);
+        }
+        for (Object x : (List<Object>) prim.get("malformed")) {
+            Map<String, Object> m = (Map<String, Object>) x;
+            String nm = String.valueOf(m.get("name"));
+            Object in = m.get("input");
+            malformedRan++;
+            try {
+                boolean accepted;
+                switch (String.valueOf(m.get("api"))) {
+                    case "chain": {
+                        Map<String, Object> i = (Map<String, Object>) in;
+                        accepted = Pca.verifyChain((List<Object>) i.get("chain"), (String) i.get("expected_root_issuer"), true, null).isEmpty();
+                        break;
+                    }
+                    case "threshold_share": accepted = Threshold.verifyShareEntry(in); break;
+                    case "pcactn_json": {
+                        Map<String, Object> i = (Map<String, Object>) in;
+                        accepted = Pca.verifyPcactnJson((String) i.get("text"), (Map<String, Object>) i.get("grant"), Json.asLong(i.get("now")), (String) i.get("aud")).allow;
+                        break;
+                    }
+                    default: accepted = true;
+                }
+                check(!accepted, "malformed " + nm + ": accepted");
+            } catch (Throwable th) { check(false, "malformed " + nm + ": THREW " + th); }
+        }
+        check(tsRan + tsSkipped >= 55 && malformedRan >= 80, "round-6 primitives present (threshold_set " + (tsRan + tsSkipped) + ", malformed " + malformedRan + ")");
+        System.out.println("ROUND6: threshold_set " + tsRan + " run, " + tsSkipped + " skipped; malformed " + malformedRan);
+
+        // ---- nesting depth (gen-conformance-depth.mjs): limit-1 / limit / limit+1 and a huge (expanded) depth per entry point.
+        // Each case runs on a 512 KiB-stack thread (a typical servlet worker): the verdict must equal `valid` and nothing may escape.
+        int depthRan = 0;
+        for (Object x : (List<Object>) prim.get("depth")) {
+            Map<String, Object> d = (Map<String, Object>) x;
+            String nm = String.valueOf(d.get("name"));
+            Object in = expandDepthInput(String.valueOf(d.get("api")), d.get("input"), (Map<String, Object>) d.get("expand"));
+            boolean want = Boolean.TRUE.equals(d.get("valid"));
+            Object[] out = new Object[1];
+            Thread t = new Thread(null, () -> {
+                try { out[0] = depthVerdict(String.valueOf(d.get("api")), in); } catch (Throwable th) { out[0] = th; }
+            }, "depth", 512 * 1024);
+            t.start();
+            try { t.join(); } catch (InterruptedException ie) { throw new IllegalStateException(ie); }
+            if (out[0] instanceof Throwable) check(false, "depth " + nm + ": THREW " + out[0]);
+            else check(Boolean.valueOf(want).equals(out[0]), "depth " + nm + ": verdict=" + out[0] + " want " + want);
+            depthRan++;
+        }
+        check(depthRan >= 20, "depth primitives present (" + depthRan + ")");
+        System.out.println("DEPTH: " + depthRan + " run");
+
         // ---- report ------------------------------------------------------------------------------------------
         System.out.println();
         System.out.println("VECTORS: " + (ran + skipped) + " total = " + ran + " run (" + (ran - vecFails) + " passed, " + vecFails + " failed), " + skipped + " skipped");
@@ -237,7 +377,8 @@ public class ConformanceTest {
             + "bare-agent rejected=" + bareAgentRejectVerified + ", wrong-set rejected=" + wrongSetRejectVerified
             + ", bound-agent accepted=" + boundAgentAccepted);
         System.out.println("PQ_ARTIFACT: " + artRan + " run, " + artSkipped + " skipped (unimplemented suites)");
+        System.out.println("CHAIN_PIN (R4-01): " + pinRan + " run, " + pinSkipped + " skipped");
         System.out.println("ASSERTIONS: " + checks + " checked, " + fails + " failures");
-        System.exit(fails == 0 ? 0 : 1);
+        if (System.getProperty("pca.noexit") == null) System.exit(fails == 0 ? 0 : 1);
     }
 }

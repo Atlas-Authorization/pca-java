@@ -157,10 +157,52 @@ public final class Pq {
      * SAME agility seam as the leaf. {@code edPub} is the Ed25519 key, {@code pqPk} the ML-DSA key. Fail-closed.
      */
     public static boolean verifyArtifactSignature(String alg, String edPub, Object pqPk, byte[] msg, Object sig, Object pqSig) {
-        return verifyLeafSuite(alg, true, edPub, pqPk, msg, sig, pqSig);
+        return verifyLeafSuiteCallerVouched(alg, true, edPub, pqPk, msg, sig, pqSig);
     }
 
-    static boolean verifyLeafSuite(Object alg, boolean algPresent, String holder, Object pqPk, byte[] msg,
+    /**
+     * An opaque PQ verification key (R3-01 choke point). Its constructor is private to {@link Pq} and the only caller is
+     * {@link #resolvePqKey}, so {@link #verifyLeafSuite} cannot be reached with a {@code pq_pk} read straight off the
+     * artifact being verified.
+     */
+    static final class PinnedPq {
+        private final String key;
+        private PinnedPq(String key) { this.key = key; }
+    }
+
+    /**
+     * THE choke point (R3-01), mirroring {@code resolvePqVerifyKey} in packages/pca/src/pq.ts. Returns the key to verify
+     * under, or null (REFUSE) when no verifier-side authority vouches for the artifact's {@code pq_pk}:
+     * <ol>
+     *   <li>{@code trustedPk}: a key the verifier itself holds (the stored grant). Used as is.</li>
+     *   <li>{@code pqPins[identity]} (own entry only): the artifact's pq_pk MUST equal the pin; a differing pin refuses.</li>
+     *   <li>{@code holderPq}: the artifact's pq_pk must hash to the signer's committed holder_pq (F-2).</li>
+     * </ol>
+     * Natives have no allowUnboundPq: an artifact's own key is never enough.
+     */
+    static PinnedPq resolvePqKey(String identity, Object artifactPk, Object holderPq, Map<String, Object> pqPins, String trustedPk) {
+        if (trustedPk != null && !trustedPk.isEmpty()) return new PinnedPq(trustedPk);
+        if (!(artifactPk instanceof String) || ((String) artifactPk).isEmpty()) return null;
+        String pk = (String) artifactPk;
+        if (pqPins != null && identity != null && pqPins.containsKey(identity))
+            return pk.equals(pqPins.get(identity)) ? new PinnedPq(pk) : null;
+        if (holderPq instanceof String && Pca.holderPqCommitment(pk).equals(holderPq)) return new PinnedPq(pk);
+        return null;
+    }
+
+    /**
+     * CALLER-VOUCHED wrapper: verifies under the artifact's OWN {@code pq_pk}. ONLY for surfaces whose key is authorised
+     * elsewhere (threshold shares, the pq_artifact conformance primitives); it proves nothing about who issued the
+     * artifact. The chain and the PCActn leaf never call it; they resolve through {@link #resolvePqKey}.
+     */
+    static boolean verifyLeafSuiteCallerVouched(Object alg, boolean algPresent, String holder, Object pqPk, byte[] msg,
+                                                Object sig, Object pqSig) {
+        return verifyLeafSuite(alg, algPresent, holder,
+            pqPk instanceof String ? resolvePqKey(null, pqPk, null, null, (String) pqPk) : null, msg, sig, pqSig);
+    }
+
+    /** Verify under suite {@code alg}. The PQ half verifies ONLY under {@code pq} (never an artifact-supplied key). */
+    static boolean verifyLeafSuite(Object alg, boolean algPresent, String holder, PinnedPq pq, byte[] msg,
                                    Object sig, Object pqSig) {
         Suite suite = resolveSigAlg(alg, algPresent);
         if (suite == null) return false;
@@ -170,10 +212,10 @@ public final class Pq {
             case "ed25519":
                 return Pca.verifyB64u(holder, msg, sigStr);
             case "ml-dsa-65":
-                return mlDsa65VerifyB64u(pqPk, msg, sigStr);
+                return pq != null && mlDsa65VerifyB64u(pq.key, msg, sigStr);
             case "hybrid-ed25519-ml-dsa-65":
                 if (!(pqSig instanceof String)) return false;
-                return Pca.verifyB64u(holder, msg, sigStr) && mlDsa65VerifyB64u(pqPk, msg, (String) pqSig);
+                return Pca.verifyB64u(holder, msg, sigStr) && pq != null && mlDsa65VerifyB64u(pq.key, msg, (String) pqSig);
             default:
                 return false;
         }

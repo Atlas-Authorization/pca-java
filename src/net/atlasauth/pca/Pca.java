@@ -23,6 +23,35 @@ public final class Pca {
 
     public static final int WIRE_VERSION = 2;
     public static final int MAX_CHAIN_HOPS = 16;
+    /** Shared hard caveat caps (all PCA verifiers): per-hop cumulative list, and the sum over every hop of a chain. */
+    public static final int MAX_CAVEATS_PER_HOP = 256;
+    public static final int MAX_CAVEATS_PER_CHAIN = 1024;
+    /** Shared raw wire-size cap of a PCActn JSON document (UTF-8 bytes), checked before any parsing. */
+    public static final int MAX_ARTIFACT_BYTES = 524288;
+    public static final String ARTIFACT_SIZE_REASON = "artifact exceeds size limit (max " + MAX_ARTIFACT_BYTES + " bytes)";
+
+    /** True when the raw document exceeds MAX_ARTIFACT_BYTES UTF-8 bytes (O(1) for clearly small/large strings). */
+    public static boolean artifactTooLarge(String text) {
+        if (text.length() > MAX_ARTIFACT_BYTES) return true;
+        if ((long) text.length() * 3 <= MAX_ARTIFACT_BYTES) return false;
+        return text.getBytes(StandardCharsets.UTF_8).length > MAX_ARTIFACT_BYTES;
+    }
+    public static final String CAVEAT_LIMIT_REASON =
+        "chain exceeds caveat limit (max " + MAX_CAVEATS_PER_HOP + " per hop, " + MAX_CAVEATS_PER_CHAIN + " per chain)";
+
+    /** True when the chain breaks the caveat caps; reads raw list sizes only, so it runs before any hashing/signature work. */
+    static boolean caveatLimitExceeded(List<Object> chain) {
+        long total = 0;
+        for (Object c : chain) {
+            if (!(c instanceof Map)) continue;
+            Object cv = ((Map<?, ?>) c).get("caveats");
+            int n = cv instanceof List ? ((List<?>) cv).size() : 0;
+            if (n > MAX_CAVEATS_PER_HOP) return true;
+            total += n;
+            if (total > MAX_CAVEATS_PER_CHAIN) return true;
+        }
+        return false;
+    }
     public static final long MAX_LIFETIME_MS = 3_600_000L;
     public static final long MAX_SKEW_MS = 60_000L;
     public static final int MAX_AUD_LEN = 256;
@@ -98,7 +127,13 @@ public final class Pca {
 
     static String asStr(Object o) { return o instanceof String ? (String) o : ""; }
 
-    static byte[] canonBytes(Object v) { return Json.canonicalize(v).getBytes(StandardCharsets.UTF_8); }
+    /**
+     * Canonical bytes of every protocol digest (capHash / hop body digest, Merkle leaves, params/conditions digests, the
+     * signer-set hash): the STRICT form, exactly as hash.ts canonicalBytes. An out-of-profile value (nesting deeper than
+     * {@link Json#MAX_DEPTH}, a non-canonical number, a lone surrogate) throws here (fail closed) instead of hashing under
+     * the lenient form that the reference never produces.
+     */
+    static byte[] canonBytes(Object v) { return Json.canonicalizeStrict(v).getBytes(StandardCharsets.UTF_8); }
 
     public static String hashCanonical(Object v) { return b64(sha(canonBytes(v))); }
 
@@ -251,6 +286,7 @@ public final class Pca {
         m.put("holder", c.get("holder"));
         m.put("caveats", c.get("caveats"));
         m.put("parent", c.get("parent"));
+        if (c.containsKey("holder_pq")) m.put("holder_pq", c.get("holder_pq"));
         return m;
     }
 
@@ -271,8 +307,33 @@ public final class Pca {
         return body;
     }
 
+    static final byte[] HOLDER_PQ_DOMAIN = "atlas-pca/holder-pq/v1\0".getBytes(StandardCharsets.UTF_8);
+
+    /** holder_pq commitment: b64u(sha256(domain || utf8(pq_pk string))). Mirrors holderPqCommitment in capability.ts. */
+    static String holderPqCommitment(String pqPk) {
+        return b64(sha(HOLDER_PQ_DOMAIN, pqPk.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /** F-2: a PQ-key suite (ml-dsa-65 / hybrid) is accepted only under the pq_pk the signer's holder committed to. Returns null when fine. */
+    static String pqBindingError(Object alg, boolean algPresent, Object pqPk, Object committed, String label) {
+        Pq.Suite suite = Pq.resolveSigAlg(alg, algPresent);
+        if (suite == null || !suite.needsPqPk) return null;
+        if (!(committed instanceof String))
+            return label + ": suite '" + suite.alg + "' needs a PQ key bound to the signer, but the signer's holder carries no holder_pq commitment (unbound PQ keys are rejected; F-2)";
+        if (!(pqPk instanceof String) || !holderPqCommitment((String) pqPk).equals(committed))
+            return label + ": pq_pk does not match the signer's committed holder_pq (F-2)";
+        return null;
+    }
+
+    /** allowedSuites policy (absent alg == ed25519); null list == no policy. Returns null when fine. */
+    static String suitePolicyError(Object alg, boolean algPresent, String label, List<String> allowed) {
+        if (allowed == null) return null;
+        String a = algPresent ? (alg instanceof String ? (String) alg : null) : "ed25519";
+        return a != null && allowed.contains(a) ? null : label + ": signature suite is not allowed by this verifier's suite policy";
+    }
+
     /** Returns "" when OK, else an error label. */
-    static String checkSig(Map<String, Object> c, String signer, String label) {
+    static String checkSig(Map<String, Object> c, String signer, String label, Pq.PinnedPq pq) {
         // Unknown suite => fail-closed (before any hashing), mirroring capability.ts checkSig.
         Map<String, Object> body = signableHopBody(c);
         if (body == null) return label + ": unknown signature alg '" + String.valueOf(c.get("alg")) + "'";
@@ -284,25 +345,81 @@ public final class Pca {
         byte[] raw = decodeB64uStrict(bd, 32);
         if (raw == null) return label + ": bad signature (not signed by expected key)";
         // Suite-agile hop verification (mirrors verifyLeafSuite): ed25519 == verifyB64u(signer, msg, sig);
-        // hybrid requires BOTH the Ed25519 `sig` (under `signer`) AND the ML-DSA `pq_sig` (under `pq_pk`);
-        // pure ml-dsa-65 verifies `sig` under `pq_pk`. The signer is the expected Ed25519 key.
-        boolean ok = Pq.verifyLeafSuite(c.get("alg"), c.containsKey("alg"), signer, c.get("pq_pk"),
+        // hybrid requires BOTH the Ed25519 `sig` (under `signer`) AND the ML-DSA `pq_sig` (under the resolved key);
+        // pure ml-dsa-65 verifies `sig` under the resolved key (never the hop's own pq_pk). The signer is the expected Ed25519 key.
+        boolean ok = Pq.verifyLeafSuite(c.get("alg"), c.containsKey("alg"), signer, pq,
             concat(CAP_DOMAIN, raw), c.get("sig"), c.get("pq_sig"));
         if (!ok) return label + ": bad signature (not signed by expected key)";
         return "";
     }
 
-    /** Returns "" when valid, else the failure reason. The 16-hop cap is enforced BEFORE any signature work. */
-    static String verifyChain(List<Object> chain, String expectedRootIssuer, boolean haveIssuer) {
-        if (chain.isEmpty()) return "empty chain";
+    static final String ROOT_PQ_PIN_REASON_FMT = "hop 0: root suite '%s' needs a PQ key pinned for the root issuer (policy.pqPins) or the verifier's stored grant (policy.trustedRoot); the root's own pq_pk proves nothing about who issued it (R3-01)";
+
+    /** Root PQ authority (mirrors rootPq in capability.ts): a verifier-side pin or the verifier's own stored copy of the root. */
+    private static Object[] resolveRootPq(Map<String, Object> root, Map<String, Object> pqPins, Map<String, Object> trustedRoot) {
+        Pq.Suite suite = Pq.resolveSigAlg(root.get("alg"), root.containsKey("alg"));
+        if (suite == null || !suite.needsPqPk) return new Object[] {null, null};
+        Object pk = root.get("pq_pk");
+        String trusted = null;
+        if (trustedRoot != null && pk instanceof String) {
+            try { if (capHash(trustedRoot).equals(capHash(root))) trusted = (String) pk; } catch (RuntimeException e) { trusted = null; }
+        }
+        Object issuer = root.get("issuer");
+        Pq.PinnedPq key = Pq.resolvePqKey(issuer instanceof String ? (String) issuer : null, pk, null, pqPins, trusted);
+        if (key == null) return new Object[] {null, String.format(ROOT_PQ_PIN_REASON_FMT, suite.alg)};
+        return new Object[] {key, null};
+    }
+
+    /** Backward-compatible overload: no PQ pins, no trusted root (a PQ root is then refused). */
+    public static String verifyChain(List<Object> chain, String expectedRootIssuer, boolean haveIssuer, List<String> allowed) {
+        return verifyChain(chain, expectedRootIssuer, haveIssuer, allowed, null, null);
+    }
+
+    /**
+     * Standalone chain verification. Returns "" when valid, else the failure reason. R4-01: a non-ed25519 (pure-PQ or
+     * hybrid) ROOT is accepted only if {@code pqPins[root.issuer]} equals the root's pq_pk, or {@code trustedRoot} is the
+     * root itself (the verifier's own stored grant); otherwise it is refused. The 16-hop cap is enforced BEFORE any signature work.
+     */
+    public static String verifyChain(List<Object> chain, String expectedRootIssuer, boolean haveIssuer, List<String> allowed,
+                                     Map<String, Object> pqPins, Map<String, Object> trustedRoot) {
+        // TOTAL (R6-05): a hostile chain is a refusal, never an exception.
+        try {
+            return verifyChainUnchecked(chain, expectedRootIssuer, haveIssuer, allowed, pqPins, trustedRoot);
+        } catch (RuntimeException ex) {
+            return "malformed capability chain: " + ex.getClass().getSimpleName();
+        }
+    }
+
+    /**
+     * Mirrors {@code wellTyped} in capability.ts: id/issuer/holder/body_digest/sig are strings; alg/pq_pk/pq_sig/holder_pq/
+     * parent are absent or strings (JSON null is NOT absent); caveats is a list of objects each with a string {@code type}.
+     */
+    static boolean wellTyped(Object o) {
+        if (!(o instanceof Map)) return false;
+        Map<?, ?> c = (Map<?, ?>) o;
+        for (String k : new String[] {"id", "issuer", "holder", "body_digest", "sig"}) if (!(c.get(k) instanceof String)) return false;
+        for (String k : new String[] {"alg", "pq_pk", "pq_sig", "holder_pq", "parent"}) if (c.containsKey(k) && !(c.get(k) instanceof String)) return false;
+        if (!(c.get("caveats") instanceof List)) return false;
+        for (Object cv : (List<?>) c.get("caveats")) if (!(cv instanceof Map) || !(((Map<?, ?>) cv).get("type") instanceof String)) return false;
+        return true;
+    }
+
+    private static String verifyChainUnchecked(List<Object> chain, String expectedRootIssuer, boolean haveIssuer, List<String> allowed,
+                                               Map<String, Object> pqPins, Map<String, Object> trustedRoot) {
+        if (chain == null || chain.isEmpty()) return "empty chain";
         if (chain.size() > MAX_CHAIN_HOPS) return "chain too long (max " + MAX_CHAIN_HOPS + " hops)";
+        if (caveatLimitExceeded(chain)) return CAVEAT_LIMIT_REASON;
         for (int i = 0; i < chain.size(); i++)
-            if (!(chain.get(i) instanceof Map)) return "hop " + i + ": malformed capability";
+            if (!wellTyped(chain.get(i))) return "hop " + i + ": malformed capability";
         Map<String, Object> root = asMap(chain.get(0));
         if (root.containsKey("parent")) return "hop 0: root must not have a parent";
         if (haveIssuer && !Objects.equals(root.get("issuer"), expectedRootIssuer))
             return "hop 0: root issuer is not the expected principal";
-        String e = checkSig(root, asStr(root.get("issuer")), "hop 0");
+        String pol0 = suitePolicyError(root.get("alg"), root.containsKey("alg"), "hop 0", allowed);
+        if (pol0 != null) return pol0;
+        Object[] rp = resolveRootPq(root, pqPins, trustedRoot);
+        if (rp[1] != null) return (String) rp[1];
+        String e = checkSig(root, asStr(root.get("issuer")), "hop 0", (Pq.PinnedPq) rp[0]);
         if (!e.isEmpty()) return e;
         for (int i = 1; i < chain.size(); i++) {
             String label = "hop " + i;
@@ -312,7 +429,12 @@ public final class Pca {
             try { ph = capHash(parent); } catch (RuntimeException ex) { return label + ": broken parent link"; }
             if (!Objects.equals(c.get("parent"), ph)) return label + ": broken parent link";
             if (!Objects.equals(c.get("issuer"), parent.get("holder"))) return label + ": issuer is not the parent's bound holder";
-            e = checkSig(c, asStr(parent.get("holder")), label);
+            String pol = suitePolicyError(c.get("alg"), c.containsKey("alg"), label, allowed);
+            if (pol != null) return pol;
+            String unb = pqBindingError(c.get("alg"), c.containsKey("alg"), c.get("pq_pk"), parent.get("holder_pq"), label);
+            if (unb != null) return unb;
+            e = checkSig(c, asStr(parent.get("holder")), label,
+                Pq.resolvePqKey(parent.get("holder") instanceof String ? (String) parent.get("holder") : null, c.get("pq_pk"), parent.get("holder_pq"), null, null));
             if (!e.isEmpty()) return e;
             List<Object> pc = asList(parent.get("caveats"));
             List<Object> cc = asList(c.get("caveats"));
@@ -343,7 +465,7 @@ public final class Pca {
      * Closed capability-hop key set (parent optional). The B4 crypto-agility fields (alg/pq_pk/pq_sig) are
      * additive on a hop exactly as at the top level: absent alg == ed25519 (pq_pk/pq_sig forbidden, byte-identical).
      */
-    private static final List<String> CAP_KEYS = java.util.Arrays.asList("id", "issuer", "holder", "body_digest", "caveats", "sig", "parent", "alg", "pq_pk", "pq_sig");
+    private static final List<String> CAP_KEYS = java.util.Arrays.asList("id", "issuer", "holder", "body_digest", "caveats", "sig", "parent", "alg", "pq_pk", "pq_sig", "holder_pq");
 
     private static boolean isObj(Object o) { return o instanceof Map; }
     private static boolean isStr(Object o) { return o instanceof String; }
@@ -432,6 +554,8 @@ public final class Pca {
                 if (hopSigWire != null) return "cap_chain[" + i + "]: " + hopSigWire;
                 if (c.containsKey("parent") && decodeB64uStrict(c.get("parent"), 32) == null)
                     return "cap_chain[" + i + "].parent is not canonical base64url (32 bytes)";
+                if (c.containsKey("holder_pq") && decodeB64uStrict(c.get("holder_pq"), 32) == null)
+                    return "cap_chain[" + i + "].holder_pq is not canonical base64url (32 bytes)";
                 if (!(c.get("caveats") instanceof List)) return "cap_chain[" + i + "].caveats must be an array of {type,...} objects";
                 for (Object cv : (List<Object>) c.get("caveats"))
                     if (!isObj(cv) || !isStr(((Map<String, Object>) cv).get("type")))
@@ -499,6 +623,16 @@ public final class Pca {
 
     /** Verify raw PCActn JSON text: strict-profile parse first (any failure, or a non-object, is a wire failure). */
     public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience) {
+        return verifyPcactnJson(text, grant, now, audience, null);
+    }
+
+    /** As above with an optional allowed-suites policy (null = none; an empty list refuses every suite). */
+    public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites) {
+        if (text != null && artifactTooLarge(text)) { // FIRST: before any parsing (null: refused by the strict parse below)
+            Verdict big = new Verdict();
+            big.fail("wire", ARTIFACT_SIZE_REASON);
+            return big;
+        }
         Object parsed;
         try {
             parsed = Json.parse(text);
@@ -507,7 +641,7 @@ public final class Pca {
             v.fail("wire", "strict JSON: " + e.getMessage());
             return v;
         }
-        return verifyPcactn(parsed, grant, now, audience);
+        return verifyPcactn(parsed, grant, now, audience, allowedSuites);
     }
 
     /**
@@ -515,6 +649,22 @@ public final class Pca {
      * validity, chain, plan_inclusion, leaf_signature, counter. allow = every check true.
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience) {
+        return verifyPcactn(pcactn, grant, now, audience, null);
+    }
+
+    /** As above with an optional allowed-suites policy (null = none; an empty list refuses every suite). */
+    public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites) {
+        // TOTAL (R6-05): any residual fault on hostile input is a terminal wire refusal, never an exception.
+        try {
+            return verifyPcactnUnchecked(pcactn, grant, now, audience, allowedSuites);
+        } catch (RuntimeException ex) {
+            Verdict w = new Verdict();
+            w.fail("wire", "malformed input (" + ex.getClass().getSimpleName() + ")");
+            return w;
+        }
+    }
+
+    private static Verdict verifyPcactnUnchecked(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites) {
         Verdict v = new Verdict();
         String wire = validateWireV2(pcactn);
         if (wire != null) {
@@ -545,8 +695,9 @@ public final class Pca {
             String why;
             if (chain.isEmpty()) why = "empty chain";
             else if (chain.size() > MAX_CHAIN_HOPS) why = "chain too long (max " + MAX_CHAIN_HOPS + " hops)";
+            else if (caveatLimitExceeded(chain)) why = CAVEAT_LIMIT_REASON;
             else if (!capHash(asMap(chain.get(0))).equals(capHash(grant))) why = "chain root is not the grant";
-            else why = verifyChain(chain, asStr(grant.get("issuer")), grant.get("issuer") instanceof String);
+            else why = verifyChain(chain, asStr(grant.get("issuer")), grant.get("issuer") instanceof String, allowedSuites, null, grant); // chain[0] == grant checked above
             if (why.isEmpty()) v.checks.put("chain", true); else v.fail("chain", why);
 
             // grant_ref_bound (normative): the signed grant_ref MUST be a non-empty string byte-equal to the id of the
@@ -577,9 +728,12 @@ public final class Pca {
             // ml-dsa-65 / hybrid add ML-DSA-65 (FIPS-204) over the SAME signed message. Fail-closed.
             boolean sigOk = false;
             if (!chain.isEmpty()) {
-                String holder = asStr(asMap(chain.get(chain.size() - 1)).get("holder"));
-                sigOk = Pq.verifyLeafSuite(p.get("alg"), p.containsKey("alg"), holder, p.get("pq_pk"),
-                    thresholdMessage(p), p.get("sig"), p.get("pq_sig"));
+                Map<String, Object> leafCap = asMap(chain.get(chain.size() - 1));
+                String holder = asStr(leafCap.get("holder"));
+                String lerr = suitePolicyError(p.get("alg"), p.containsKey("alg"), "leaf", allowedSuites);
+                if (lerr == null) lerr = pqBindingError(p.get("alg"), p.containsKey("alg"), p.get("pq_pk"), leafCap.get("holder_pq"), "leaf");
+                if (lerr == null) sigOk = Pq.verifyLeafSuite(p.get("alg"), p.containsKey("alg"), holder,
+                    Pq.resolvePqKey(holder, p.get("pq_pk"), leafCap.get("holder_pq"), null, null), thresholdMessage(p), p.get("sig"), p.get("pq_sig"));
             }
             if (sigOk) v.checks.put("leaf_signature", true);
             else v.fail("leaf_signature", "signature does not verify under the leaf holder key");

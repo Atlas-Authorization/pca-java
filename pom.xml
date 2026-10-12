@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mutation-testing build only (PIT). The library itself ships as plain sources; see ConformanceTest.java for the plain run. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.atlasauth</groupId><artifactId>pca-mutation</artifactId><version>0</version>
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <dependencies>
+    <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId><version>1.80</version></dependency>
+    <dependency><groupId>jakarta.servlet</groupId><artifactId>jakarta.servlet-api</artifactId><version>6.0.0</version></dependency>
+    <dependency><groupId>org.springframework</groupId><artifactId>spring-webmvc</artifactId><version>6.1.14</version></dependency>
+    <dependency><groupId>org.springframework</groupId><artifactId>spring-test</artifactId><version>6.1.14</version><scope>test</scope></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.3</version><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <sourceDirectory>src</sourceDirectory>
+    <testSourceDirectory>.</testSourceDirectory>
+    <plugins>
+      <plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version>
+        <configuration><testIncludes><testInclude>*.java</testInclude><testInclude>test/**/*.java</testInclude></testIncludes></configuration></plugin>
+      <plugin><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version>
+        <configuration><argLine>-Xss8m -Xmx2g</argLine><includes><include>MutationHarness</include><include>**/*Test</include></includes></configuration></plugin>
+      <plugin><groupId>org.pitest</groupId><artifactId>pitest-maven</artifactId><version>1.17.1</version>
+        <dependencies><dependency><groupId>org.pitest</groupId><artifactId>pitest-junit5-plugin</artifactId><version>1.2.1</version></dependency></dependencies>
+        <configuration>
+          <targetClasses><param>net.atlasauth.pca.*</param></targetClasses>
+          <targetTests><param>MutationHarness</param><param>net.atlasauth.pca.*Test</param></targetTests>
+          <mutators><mutator>ALL</mutator></mutators>
+          <timeoutConstant>8000</timeoutConstant>
+          <outputFormats><format>XML</format><format>HTML</format></outputFormats>
+          <exportLineCoverage>true</exportLineCoverage>
+          <failWhenNoMutations>false</failWhenNoMutations>
+          <jvmArgs><arg>-Xss8m</arg><arg>-Xmx1500m</arg></jvmArgs>
+        </configuration></plugin>
+    </plugins>
+  </build>
+</project>

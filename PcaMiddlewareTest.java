@@ -50,6 +50,7 @@ public class PcaMiddlewareTest {
 
     @SuppressWarnings("unchecked")
     public static void main(String[] args) throws Exception {
+        fails = 0; checks = 0;
         Map<String, Object> doc = load("vectors.json");
         // Reuse a genuinely-signed, allow=true vector that ships its PCActn as raw strict JSON text.
         Map<String, Object> vec = null;
@@ -178,6 +179,6 @@ public class PcaMiddlewareTest {
         }
 
         System.out.println(checks + " assertions, " + fails + " failures");
-        System.exit(fails == 0 ? 0 : 1);
+        if (System.getProperty("pca.noexit") == null) System.exit(fails == 0 ? 0 : 1);
     }
 }
