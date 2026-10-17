@@ -1,4 +1,5 @@
 import net.atlasauth.pca.Json;
+import net.atlasauth.pca.IntentV2;
 import net.atlasauth.pca.Pca;
 
 import java.io.InputStream;
@@ -68,8 +69,10 @@ public class MutationHarness {
             Map<String, Object> grant = (Map<String, Object>) v.get("grant");
             Pca.Verdict got;
             try {
-                got = v.containsKey("pcactn_json") ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud, allowedSuites)
-                    : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud, allowedSuites);
+                Pca.IntentPolicy intentPolicy = (ctx.get("intent_policy_json") instanceof String ? Pca.IntentPolicy.fromJsonText((String) ctx.get("intent_policy_json")) : Pca.IntentPolicy.fromJson(ctx.get("intent_policy")));
+                IntentV2.Context intentV2 = (ctx.containsKey("intent_v2") ? IntentV2.Context.fromJson(ctx.get("intent_v2")) : null);
+                got = v.containsKey("pcactn_json") ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud, allowedSuites, intentPolicy, intentV2)
+                    : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud, allowedSuites, intentPolicy, intentV2);
             } catch (StackOverflowError | RuntimeException e) { Assertions.fail(v.get("name") + " threw " + e); return; }
             Map<String, Object> exp = (Map<String, Object>) v.get("expect");
             Assertions.assertEquals(exp.get("allow"), got.allow, String.valueOf(v.get("name")));

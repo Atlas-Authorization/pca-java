@@ -1105,4 +1105,428 @@ public class PcaUnitTest {
         assertFalse(java.util.Arrays.equals(bare, msg));
         assertEquals(32 + 22 + 1 + 32 + Threshold.shareSuiteTag("ml-dsa-65", true).length - 0, msg.length - 0 + 0 - 0 + 0);
     }
+
+    // ------------------------------------------------------------------ Intent Layer M2: envelope.intent
+    /** Cross-language pin: base64url(sha256(strictCanonical({d:"atlas-pca/goal/v1\0", goal:"pca-intent:v1:B32:B32", salt:"salt"}))). */
+    static final String INTENT_COMMIT = "ydb-xdDmGIg5nClx85Jyt4NstgcNXKLofdPhe5NrNA4";
+
+    static Map<String, Object> intentSlot() {
+        return map("ref", B32, "map_digest", B32, "goal_salt", "salt", "fidelity_ppm", n("950000"), "residual_risk_ppm", n("4310000"));
+    }
+    static Map<String, Object> intentGrant(Object goalCommit) {
+        return map("caveats", new ArrayList<>(List.of(map("type", "max_spend", "usd", n("100")), map("type", "envelope", "goal_commit", goalCommit))));
+    }
+
+    @Test void intentWire() {
+        assertNull(Pca.validateIntentWire(intentSlot()));
+        assertEquals("'intent' must be an object", Pca.validateIntentWire(null));
+        assertEquals("'intent' must be an object", Pca.validateIntentWire("x"));
+        assertEquals("'intent' must be an object", Pca.validateIntentWire(new ArrayList<>(List.of(intentSlot()))));
+        Map<String, Object> i = intentSlot(); i.put("note", "x");
+        assertEquals("unknown field 'intent.note'", Pca.validateIntentWire(i));
+        i = intentSlot(); i.remove("residual_risk_ppm");
+        assertEquals("missing field 'intent.residual_risk_ppm'", Pca.validateIntentWire(i));
+        i = intentSlot(); i.put("ref", B32 + "=");
+        assertEquals("'intent.ref' is not canonical base64url (32 bytes)", Pca.validateIntentWire(i));
+        i = intentSlot(); i.put("map_digest", "+" + B32.substring(1));
+        assertEquals("'intent.map_digest' is not canonical base64url (32 bytes)", Pca.validateIntentWire(i));
+        i = intentSlot(); i.put("goal_salt", "");
+        assertEquals("'intent.goal_salt' must be a non-empty string (<= 128 UTF-8 bytes)", Pca.validateIntentWire(i));
+        i.put("goal_salt", "\u00e9".repeat(64));
+        assertNull(Pca.validateIntentWire(i));
+        i.put("goal_salt", "\u00e9".repeat(64) + "a");
+        assertEquals("'intent.goal_salt' must be a non-empty string (<= 128 UTF-8 bytes)", Pca.validateIntentWire(i));
+        i = intentSlot(); i.put("fidelity_ppm", n("1000000"));
+        assertNull(Pca.validateIntentWire(i));
+        for (Object bad : new Object[] {n("1000001"), n("-1"), n("1.5"), "950000", true}) {
+            i.put("fidelity_ppm", bad);
+            assertEquals("'intent.fidelity_ppm' must be a safe integer in [0, 1000000]", Pca.validateIntentWire(i));
+        }
+        i = intentSlot(); i.put("residual_risk_ppm", n("9007199254740991"));
+        assertNull(Pca.validateIntentWire(i));
+        for (Object bad : new Object[] {n("-1"), n("0.25"), true}) {
+            i.put("residual_risk_ppm", bad);
+            assertEquals("'intent.residual_risk_ppm' must be a non-negative safe integer", Pca.validateIntentWire(i));
+        }
+    }
+
+    @Test void intentPolicyAndBinding() {
+        assertEquals(INTENT_COMMIT, Pca.intentGoalCommit(B32, B32, "salt"));
+        assertEquals("pca-intent:v1:" + B32 + ":" + B32, Pca.intentGoal(B32, B32));
+        assertFalse(new Pca.IntentPolicy(false, null, null).isActive());
+        assertTrue(Pca.IntentPolicy.required().isActive());
+        assertTrue(new Pca.IntentPolicy(false, 1.0, null).isActive());
+        assertNull(Pca.IntentPolicy.fromJson("x"));
+        assertFalse(Pca.IntentPolicy.fromJson(map("require", false)).isActive());
+        assertTrue(Pca.IntentPolicy.fromJson(map("max_residual_risk_ppm", null)).isActive());
+        assertTrue(Double.isNaN(Pca.IntentPolicy.fromJson(map("min_fidelity_ppm", "1")).minFidelityPpm));
+
+        Map<String, Object> g = intentGrant(INTENT_COMMIT);
+        // absent: not reported without an active policy (back-compat)
+        assertNull(Pca.decideIntent(null, false, g, null));
+        assertNull(Pca.decideIntent(null, false, g, new Pca.IntentPolicy(false, null, null)));
+        assertEquals("this verifier requires an intent binding but the PCActn carries none", Pca.decideIntent(null, false, g, Pca.IntentPolicy.required()));
+        assertEquals("this verifier requires an intent binding but the PCActn carries none", Pca.decideIntent(null, false, g, new Pca.IntentPolicy(false, 1.0, null)));
+        // positive binding (the envelope is the SECOND caveat: first envelope wins, not first caveat)
+        assertEquals("", Pca.decideIntent(intentSlot(), true, g, null));
+        assertEquals("", Pca.decideIntent(intentSlot(), true, g, new Pca.IntentPolicy(true, 950000.0, 4310000.0)));
+        // misconfigured thresholds fail closed (checked first)
+        String mis = "intent policy misconfigured: thresholds must be non-negative safe integers (fail closed)";
+        assertEquals(mis, Pca.decideIntent(intentSlot(), true, g, new Pca.IntentPolicy(false, -1.0, null)));
+        assertEquals(mis, Pca.decideIntent(intentSlot(), true, g, new Pca.IntentPolicy(false, null, 0.5)));
+        assertEquals(mis, Pca.decideIntent(intentSlot(), true, g, new Pca.IntentPolicy(false, -0.0, null)));
+        assertEquals(mis, Pca.decideIntent(intentSlot(), true, g, new Pca.IntentPolicy(false, 9007199254740992.0, null)));
+        assertEquals(mis, Pca.decideIntent(null, false, g, Pca.IntentPolicy.fromJson(map("min_fidelity_ppm", "1"))));
+        // thresholds
+        assertEquals("intent fidelity 950000 ppm is below the policy minimum 950001", Pca.decideIntent(intentSlot(), true, g, new Pca.IntentPolicy(false, 950001.0, null)));
+        assertEquals("intent residual risk 4310000 ppm exceeds the policy maximum 4309999", Pca.decideIntent(intentSlot(), true, g, new Pca.IntentPolicy(false, null, 4309999.0)));
+        // binding failures
+        String open = "intent ref / map_digest / goal_salt do not open the root grant's goal commitment";
+        Map<String, Object> i = intentSlot(); i.put("goal_salt", "wrong-salt");
+        assertEquals(open, Pca.decideIntent(i, true, g, null));
+        String none = "the root grant carries no envelope goal commitment to bind the intent to";
+        assertEquals(none, Pca.decideIntent(intentSlot(), true, intentGrant(n("7")), null));
+        assertEquals(none, Pca.decideIntent(intentSlot(), true, map("caveats", new ArrayList<>()), null));
+        assertEquals(none, Pca.decideIntent(intentSlot(), true, map(), null));
+        Map<String, Object> two = map("caveats", new ArrayList<>(List.of(map("type", "envelope", "goal_commit", B32), map("type", "envelope", "goal_commit", INTENT_COMMIT))));
+        assertEquals(open, Pca.decideIntent(intentSlot(), true, two, null));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test void intentVerify() throws Exception {
+        List<String> base = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter");
+        String raw = (String) vec("valid-raw-json-format-insensitive").get("pcactn_json");
+        // absent policy / inactive policy: the pre-M2 verdict exactly
+        Pca.Verdict g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, null);
+        assertTrue(g.allow);
+        assertEquals(base, new ArrayList<>(g.checks.keySet()));
+        g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, new Pca.IntentPolicy(false, null, null));
+        assertTrue(g.allow);
+        assertEquals(base, new ArrayList<>(g.checks.keySet()));
+        // active policy, no intent: reported last, fails closed
+        g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, Pca.IntentPolicy.required());
+        assertFalse(g.allow);
+        List<String> withIntent = new ArrayList<>(base); withIntent.add("intent");
+        assertEquals(withIntent, new ArrayList<>(g.checks.keySet()));
+        assertEquals(Boolean.FALSE, g.checks.get("intent"));
+        assertEquals("intent: this verifier requires an intent binding but the PCActn carries none", g.reason);
+        // carried intent is signed (leaf_signature breaks) and reported even without a policy
+        Map<String, Object> p = (Map<String, Object>) Json.parse(raw);
+        p.put("intent", intentSlot());
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        assertEquals(withIntent, new ArrayList<>(g.checks.keySet()));
+        assertEquals(Boolean.TRUE, g.checks.get("wire"));
+        assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
+        assertEquals(Boolean.FALSE, g.checks.get("intent"));
+        // the binding itself is judged against the verifier's grant argument
+        Map<String, Object> bound = new LinkedHashMap<>(validGrant());
+        bound.put("caveats", intentGrant(INTENT_COMMIT).get("caveats"));
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, bound, NOW, AUD).checks.get("intent"));
+        // wire: present-but-null is a terminal wire failure
+        p.put("intent", null);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, Pca.IntentPolicy.required());
+        assertEquals(List.of("wire"), new ArrayList<>(g.checks.keySet()));
+        assertEquals("wire: 'intent' must be an object", g.reason);
+    }
+
+    // ------------------------------------------------------------------ Intent Layer M2: mutation-kill boundaries
+    static final String E_FID = "'intent.fidelity_ppm' must be a safe integer in [0, 1000000]";
+    static final String E_RISK = "'intent.residual_risk_ppm' must be a non-negative safe integer";
+    static final String E_SALT = "'intent.goal_salt' must be a non-empty string (<= 128 UTF-8 bytes)";
+    static final String E_REF = "'intent.ref' is not canonical base64url (32 bytes)";
+    static final String E_MAP = "'intent.map_digest' is not canonical base64url (32 bytes)";
+    static final String I_MIS = "intent policy misconfigured: thresholds must be non-negative safe integers (fail closed)";
+    static final String I_NONE = "this verifier requires an intent binding but the PCActn carries none";
+    static final String I_NOENV = "the root grant carries no envelope goal commitment to bind the intent to";
+    static final String I_OPEN = "intent ref / map_digest / goal_salt do not open the root grant's goal commitment";
+    static final List<String> BASE_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter");
+    static final List<String> INTENT_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter", "intent");
+
+    static Map<String, Object> slotWith(String k, Object v) { Map<String, Object> i = intentSlot(); i.put(k, v); return i; }
+    static Map<String, Object> envelope(Object goalCommit) { return map("type", "envelope", "goal_commit", goalCommit); }
+    static Map<String, Object> grantOf(Object... caveats) { return map("caveats", new ArrayList<>(Arrays.asList(caveats))); }
+    static String decide(Map<String, Object> intent, Map<String, Object> grant, Pca.IntentPolicy pol) { return Pca.decideIntent(intent, intent != null, grant, pol); }
+
+    /** A real root grant (principal -> agent) whose caveats are [max_spend, envelope(goal_commit)]. */
+    static Map<String, Object> intentRoot() throws Exception {
+        List<Object> cav = new ArrayList<>(List.of(map("type", "max_spend", "usd", n("100")), envelope(INTENT_COMMIT)));
+        return signedCap(PqChainTest.pub("principal"), PqChainTest.pub("agent"), cav, null, "principal");
+    }
+    /** The valid PCActn re-rooted on `root`, carrying `intent` (when non-null), re-signed by the agent leaf key. */
+    static Map<String, Object> signedWithIntent(Map<String, Object> root, Map<String, Object> intent) throws Exception {
+        Map<String, Object> p = valid();
+        p.put("cap_chain", new ArrayList<>(List.of(root)));
+        p.put("grant_ref", root.get("id"));
+        if (intent != null) p.put("intent", intent);
+        p.put("sig", PqChainTest.edSign("agent", Pca.thresholdMessage(p)));
+        return p;
+    }
+
+    @Test void intentKillWireBoundaries() {
+        // fidelity_ppm: [0, 1000000] inclusive, safe integer only
+        assertNull(Pca.validateIntentWire(slotWith("fidelity_ppm", n("0"))));
+        assertNull(Pca.validateIntentWire(slotWith("fidelity_ppm", n("1"))));
+        assertNull(Pca.validateIntentWire(slotWith("fidelity_ppm", n("999999"))));
+        assertNull(Pca.validateIntentWire(slotWith("fidelity_ppm", n("1000000"))));
+        assertNull(Pca.validateIntentWire(slotWith("fidelity_ppm", 0)));
+        assertNull(Pca.validateIntentWire(slotWith("fidelity_ppm", 1000000L)));
+        for (Object bad : new Object[] {n("-1"), n("1000001"), n("9007199254740991"), n("1.5"), n("0.5"), "1", true, false, null, 1000001L, -1})
+            assertEquals(E_FID, Pca.validateIntentWire(slotWith("fidelity_ppm", bad)), String.valueOf(bad));
+        // residual_risk_ppm: >= 0, any safe integer (may exceed 1e6)
+        assertNull(Pca.validateIntentWire(slotWith("residual_risk_ppm", n("0"))));
+        assertNull(Pca.validateIntentWire(slotWith("residual_risk_ppm", n("1000001"))));
+        assertNull(Pca.validateIntentWire(slotWith("residual_risk_ppm", n("9007199254740991"))));
+        for (Object bad : new Object[] {n("-1"), n("9007199254740992"), n("0.25"), "0", true, null, -1L})
+            assertEquals(E_RISK, Pca.validateIntentWire(slotWith("residual_risk_ppm", bad)), String.valueOf(bad));
+        // goal_salt: 1..128 UTF-8 BYTES (not chars)
+        assertNull(Pca.validateIntentWire(slotWith("goal_salt", "a")));
+        assertNull(Pca.validateIntentWire(slotWith("goal_salt", "a".repeat(128))));
+        assertNull(Pca.validateIntentWire(slotWith("goal_salt", "é".repeat(64))));
+        assertEquals(E_SALT, Pca.validateIntentWire(slotWith("goal_salt", "a".repeat(129))));
+        assertEquals(E_SALT, Pca.validateIntentWire(slotWith("goal_salt", "é".repeat(64) + "a")));
+        assertEquals(E_SALT, Pca.validateIntentWire(slotWith("goal_salt", "é".repeat(65)))); // 65 chars, 130 bytes
+        for (Object bad : new Object[] {"", n("5"), null, true, new ArrayList<>(), map()})
+            assertEquals(E_SALT, Pca.validateIntentWire(slotWith("goal_salt", bad)), String.valueOf(bad));
+        // ref / map_digest: canonical b64u, exactly 32 bytes
+        String b31 = Pca.b64(new byte[31]), b33 = Pca.b64(new byte[33]);
+        for (Object bad : new Object[] {b31, b33, B32 + "=", "+" + B32.substring(1), "/" + B32.substring(1), "", n("1"), null, true})
+            assertEquals(E_REF, Pca.validateIntentWire(slotWith("ref", bad)), String.valueOf(bad));
+        for (Object bad : new Object[] {b31, b33, B32 + "=", "+" + B32.substring(1), "", n("1"), null})
+            assertEquals(E_MAP, Pca.validateIntentWire(slotWith("map_digest", bad)), String.valueOf(bad));
+        // ref is checked before map_digest, map_digest before goal_salt, goal_salt before the ppm figures
+        Map<String, Object> all = intentSlot();
+        all.put("ref", ""); all.put("map_digest", ""); all.put("goal_salt", ""); all.put("fidelity_ppm", n("-1")); all.put("residual_risk_ppm", n("-1"));
+        assertEquals(E_REF, Pca.validateIntentWire(all));
+        all.put("ref", B32); assertEquals(E_MAP, Pca.validateIntentWire(all));
+        all.put("map_digest", B32); assertEquals(E_SALT, Pca.validateIntentWire(all));
+        all.put("goal_salt", "s"); assertEquals(E_FID, Pca.validateIntentWire(all));
+        all.put("fidelity_ppm", n("0")); assertEquals(E_RISK, Pca.validateIntentWire(all));
+        all.put("residual_risk_ppm", n("0")); assertNull(Pca.validateIntentWire(all));
+    }
+
+    @Test void intentKillWireShape() {
+        for (String k : List.of("ref", "map_digest", "goal_salt", "fidelity_ppm", "residual_risk_ppm")) {
+            Map<String, Object> i = intentSlot(); i.remove(k);
+            assertEquals("missing field 'intent." + k + "'", Pca.validateIntentWire(i));
+        }
+        Map<String, Object> extra = intentSlot(); extra.put("note", "x");
+        assertEquals("unknown field 'intent.note'", Pca.validateIntentWire(extra));
+        Map<String, Object> both = intentSlot(); both.remove("ref"); both.put("zz", 1); // unknown is reported before missing
+        assertEquals("unknown field 'intent.zz'", Pca.validateIntentWire(both));
+        for (Object bad : new Object[] {null, "x", n("1"), true, new ArrayList<>(List.of(intentSlot())), new ArrayList<>()})
+            assertEquals("'intent' must be an object", Pca.validateIntentWire(bad), String.valueOf(bad));
+        assertEquals("missing field 'intent.ref'", Pca.validateIntentWire(map()));
+    }
+
+    @Test void intentKillPolicy() {
+        assertFalse(new Pca.IntentPolicy(false, null, null).isActive());
+        assertTrue(new Pca.IntentPolicy(true, null, null).isActive());
+        assertTrue(new Pca.IntentPolicy(false, 0.0, null).isActive());
+        assertTrue(new Pca.IntentPolicy(false, null, 0.0).isActive());
+        assertTrue(Pca.IntentPolicy.required().require);
+        assertNull(Pca.IntentPolicy.required().minFidelityPpm);
+        assertNull(Pca.IntentPolicy.required().maxResidualRiskPpm);
+        assertNull(Pca.IntentPolicy.fromJson(null));
+        assertNull(Pca.IntentPolicy.fromJson(new ArrayList<>()));
+        assertFalse(Pca.IntentPolicy.fromJson(map()).isActive());
+        assertFalse(Pca.IntentPolicy.fromJson(map("require", false)).isActive());
+        assertFalse(Pca.IntentPolicy.fromJson(map("require", "true")).isActive());
+        assertFalse(Pca.IntentPolicy.fromJson(map("require", n("1"))).isActive());
+        assertTrue(Pca.IntentPolicy.fromJson(map("require", true)).isActive());
+        Pca.IntentPolicy fj = Pca.IntentPolicy.fromJson(map("min_fidelity_ppm", n("950000"), "max_residual_risk_ppm", 7));
+        assertEquals(950000.0, fj.minFidelityPpm);
+        assertEquals(7.0, fj.maxResidualRiskPpm);
+        assertFalse(fj.require);
+        assertEquals(-1.0, Pca.IntentPolicy.fromJson(map("min_fidelity_ppm", n("-1"))).minFidelityPpm);
+        assertEquals(0.5, Pca.IntentPolicy.fromJson(map("max_residual_risk_ppm", n("0.5"))).maxResidualRiskPpm);
+        assertTrue(Double.isNaN(Pca.IntentPolicy.fromJson(map("max_residual_risk_ppm", null)).maxResidualRiskPpm));
+        assertTrue(Double.isNaN(Pca.IntentPolicy.fromJson(map("max_residual_risk_ppm", true)).maxResidualRiskPpm));
+        assertNull(Pca.IntentPolicy.fromJson(map("require", true)).minFidelityPpm);
+        // okThreshold: null and safe integers >= 0 pass; everything else fails
+        for (Double ok : new Double[] {null, 0.0, 1.0, 950000.0, 9007199254740991.0}) assertTrue(Pca.okThreshold(ok), String.valueOf(ok));
+        for (double bad : new double[] {-1.0, -0.0, 0.5, 1.5, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, 9007199254740992.0, -9007199254740991.0})
+            assertFalse(Pca.okThreshold(bad), String.valueOf(bad));
+    }
+
+    @Test void intentKillDecide() {
+        Map<String, Object> g = grantOf(envelope(INTENT_COMMIT));
+        // not evaluated: no intent and an inactive (or absent) policy
+        assertNull(decide(null, g, null));
+        assertNull(decide(null, g, new Pca.IntentPolicy(false, null, null)));
+        // active: require, or a threshold alone
+        assertEquals(I_NONE, decide(null, g, Pca.IntentPolicy.required()));
+        assertEquals(I_NONE, decide(null, g, new Pca.IntentPolicy(false, 0.0, null)));
+        assertEquals(I_NONE, decide(null, g, new Pca.IntentPolicy(false, null, 0.0)));
+        // step 0 (misconfiguration) precedes step 1 (absent) and step 2 (binding)
+        for (double bad : new double[] {-1.0, 0.5, Double.NaN, -0.0}) {
+            assertEquals(I_MIS, decide(null, g, new Pca.IntentPolicy(false, bad, null)), "min " + bad);
+            assertEquals(I_MIS, decide(null, g, new Pca.IntentPolicy(true, null, bad)), "max " + bad);
+            assertEquals(I_MIS, decide(intentSlot(), map(), new Pca.IntentPolicy(false, bad, null)), "min/nogrant " + bad);
+            assertEquals(I_MIS, decide(intentSlot(), g, new Pca.IntentPolicy(false, 0.0, bad)), "max with valid min " + bad);
+            assertEquals(I_MIS, decide(intentSlot(), g, new Pca.IntentPolicy(false, bad, 0.0)), "min with valid max " + bad);
+        }
+        // binding (step 2) precedes the thresholds (steps 3, 4)
+        assertEquals(I_NOENV, decide(intentSlot(), map(), new Pca.IntentPolicy(false, 1e6, 0.0)));
+        // pass with no policy, inactive policy, require
+        assertEquals("", decide(intentSlot(), g, null));
+        assertEquals("", decide(intentSlot(), g, new Pca.IntentPolicy(false, null, null)));
+        assertEquals("", decide(intentSlot(), g, Pca.IntentPolicy.required()));
+        // thresholds are inclusive; one past fails
+        assertEquals("", decide(intentSlot(), g, new Pca.IntentPolicy(false, 950000.0, null)));
+        assertEquals("", decide(intentSlot(), g, new Pca.IntentPolicy(false, 949999.0, null)));
+        assertEquals("", decide(intentSlot(), g, new Pca.IntentPolicy(false, 0.0, null)));
+        assertEquals("intent fidelity 950000 ppm is below the policy minimum 950001", decide(intentSlot(), g, new Pca.IntentPolicy(false, 950001.0, null)));
+        assertEquals("", decide(intentSlot(), g, new Pca.IntentPolicy(false, null, 4310000.0)));
+        assertEquals("", decide(intentSlot(), g, new Pca.IntentPolicy(false, null, 4310001.0)));
+        assertEquals("intent residual risk 4310000 ppm exceeds the policy maximum 4309999", decide(intentSlot(), g, new Pca.IntentPolicy(false, null, 4309999.0)));
+        assertEquals("intent residual risk 4310000 ppm exceeds the policy maximum 0", decide(intentSlot(), g, new Pca.IntentPolicy(false, null, 0.0)));
+        // min is checked before max; each threshold only consults its own figure
+        assertEquals("intent fidelity 950000 ppm is below the policy minimum 950001", decide(intentSlot(), g, new Pca.IntentPolicy(false, 950001.0, 0.0)));
+        assertEquals("", decide(intentSlot(), g, new Pca.IntentPolicy(true, 950000.0, 4310000.0)));
+        Map<String, Object> zero = intentSlot(); zero.put("fidelity_ppm", n("0")); zero.put("residual_risk_ppm", n("0"));
+        assertEquals("", decide(zero, g, new Pca.IntentPolicy(false, 0.0, 0.0)));
+        assertEquals("intent fidelity 0 ppm is below the policy minimum 1", decide(zero, g, new Pca.IntentPolicy(false, 1.0, null)));
+        Map<String, Object> top = intentSlot(); top.put("fidelity_ppm", n("1000000")); top.put("residual_risk_ppm", n("9007199254740991"));
+        assertEquals("", decide(top, g, new Pca.IntentPolicy(false, 1e6, 9007199254740991.0)));
+        assertEquals("intent residual risk 9007199254740991 ppm exceeds the policy maximum 9007199254740990", decide(top, g, new Pca.IntentPolicy(false, null, 9007199254740990.0)));
+    }
+
+    @Test void intentKillRootGrant() {
+        Map<String, Object> env = envelope(INTENT_COMMIT);
+        // first ENVELOPE caveat wins (not the first caveat, not the last envelope)
+        assertEquals("", decide(intentSlot(), grantOf(map("type", "max_spend"), env), null));
+        assertEquals(I_OPEN, decide(intentSlot(), grantOf(envelope(B32), env), null));
+        assertEquals("", decide(intentSlot(), grantOf(env, envelope(B32)), null));
+        assertEquals(I_NOENV, decide(intentSlot(), grantOf(envelope(n("7")), env), null)); // first envelope's goal_commit is not a string: no fallthrough
+        // non-object / non-envelope caveats before the envelope are skipped
+        assertEquals("", decide(intentSlot(), grantOf("envelope", null, n("1"), new ArrayList<>(List.of(env)), map("type", "Envelope", "goal_commit", B32), map("goal_commit", B32), env), null));
+        // goal_commit must be a string
+        for (Object bad : new Object[] {n("7"), null, true, new ArrayList<>(), map()})
+            assertEquals(I_NOENV, decide(intentSlot(), grantOf(envelope(bad)), null), String.valueOf(bad));
+        assertEquals(I_NOENV, decide(intentSlot(), grantOf(map("type", "envelope")), null));
+        // the grant must carry a caveats ARRAY with an envelope
+        assertEquals(I_NOENV, decide(intentSlot(), map(), null));
+        assertEquals(I_NOENV, decide(intentSlot(), null, null));
+        assertEquals(I_NOENV, decide(intentSlot(), map("caveats", map("0", env)), null));
+        assertEquals(I_NOENV, decide(intentSlot(), map("caveats", "x"), null));
+        assertEquals(I_NOENV, decide(intentSlot(), grantOf(), null));
+        assertEquals(I_NOENV, decide(intentSlot(), grantOf(map("type", "max_spend")), null));
+        assertEquals(INTENT_COMMIT, Pca.rootGoalCommit(grantOf("x", env, envelope(B32))));
+        assertNull(Pca.rootGoalCommit(null));
+        // every committed component is bound
+        assertEquals(I_OPEN, decide(slotWith("ref", PcaUnitTest.B32.replace('q', 'r')), grantOf(env), null));
+        assertEquals(I_OPEN, decide(slotWith("map_digest", Pca.b64(new byte[32])), grantOf(env), null));
+        assertEquals(I_OPEN, decide(slotWith("goal_salt", "salt "), grantOf(env), null));
+        // the ppm figures are NOT part of the commitment
+        assertEquals("", decide(slotWith("fidelity_ppm", n("1")), grantOf(env), null));
+        // goal string shape: with and without a map digest
+        assertEquals("pca-intent:v1:r", Pca.intentGoal("r", null));
+        assertEquals("pca-intent:v1:r", Pca.intentGoal("r", ""));
+        assertEquals("pca-intent:v1:r:m", Pca.intentGoal("r", "m"));
+        assertFalse(Pca.intentGoalCommit(B32, B32, "salt").equals(Pca.intentGoalCommit(B32, B32, "salt2")));
+    }
+
+    @Test void intentKillVerifySigned() throws Exception {
+        Map<String, Object> root = intentRoot();
+        // baseline: the re-rooted PCActn without intent verifies with the pre-M2 key set
+        Pca.Verdict g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD);
+        assertTrue(g.allow, g.reason);
+        assertEquals(BASE_KEYS, new ArrayList<>(g.checks.keySet()));
+        g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD, null, new Pca.IntentPolicy(false, null, null));
+        assertTrue(g.allow); assertEquals(BASE_KEYS, new ArrayList<>(g.checks.keySet()));
+        g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD, null, new Pca.IntentPolicy(false, 0.0, null));
+        assertFalse(g.allow); assertEquals(INTENT_KEYS, new ArrayList<>(g.checks.keySet()));
+        assertEquals("intent: " + I_NONE, g.reason);
+        // bound intent: allow, intent appended exactly after counter
+        Map<String, Object> p = signedWithIntent(root, intentSlot());
+        g = Pca.verifyPcactn(p, root, NOW, AUD);
+        assertTrue(g.allow, g.reason);
+        assertEquals("", g.reason);
+        assertEquals(INTENT_KEYS, new ArrayList<>(g.checks.keySet()));
+        assertEquals(Boolean.TRUE, g.checks.get("intent"));
+        assertTrue(Pca.verifyPcactnJson(Json.canonicalizeStrict(p), root, NOW, AUD, null, Pca.IntentPolicy.required()).allow);
+        // thresholds through the verifier: inclusive, one past fails only `intent`
+        assertTrue(Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(true, 950000.0, 4310000.0)).allow);
+        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, 950001.0, null));
+        assertFalse(g.allow);
+        assertEquals("intent: intent fidelity 950000 ppm is below the policy minimum 950001", g.reason);
+        for (String k : BASE_KEYS) assertEquals(Boolean.TRUE, g.checks.get(k), k);
+        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, null, 4309999.0));
+        assertFalse(g.allow); assertEquals(Boolean.FALSE, g.checks.get("intent"));
+        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, -1.0, null));
+        assertFalse(g.allow); assertEquals("intent: " + I_MIS, g.reason);
+        // range edges, re-signed
+        Map<String, Object> edge = intentSlot(); edge.put("fidelity_ppm", n("1000000")); edge.put("residual_risk_ppm", n("0"));
+        assertTrue(Pca.verifyPcactn(signedWithIntent(root, edge), root, NOW, AUD).allow);
+        edge.put("fidelity_ppm", n("0")); edge.put("residual_risk_ppm", n("9007199254740991"));
+        assertTrue(Pca.verifyPcactn(signedWithIntent(root, edge), root, NOW, AUD).allow);
+        // signed: tampering after signing breaks leaf_signature while the binding itself still holds
+        Map<String, Object> t = signedWithIntent(root, intentSlot());
+        m(t.get("intent")).put("fidelity_ppm", n("999999"));
+        g = Pca.verifyPcactn(t, root, NOW, AUD);
+        assertFalse(g.allow);
+        assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
+        assertEquals(Boolean.TRUE, g.checks.get("intent"));
+        assertEquals(INTENT_KEYS, new ArrayList<>(g.checks.keySet()));
+        // stripping the signed intent also breaks the signature (and drops the check)
+        Map<String, Object> s = signedWithIntent(root, intentSlot());
+        s.remove("intent");
+        g = Pca.verifyPcactn(s, root, NOW, AUD);
+        assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
+        assertEquals(BASE_KEYS, new ArrayList<>(g.checks.keySet()));
+        // a grant-binding failure fails only `intent`
+        Map<String, Object> salt = signedWithIntent(root, slotWith("goal_salt", "other"));
+        g = Pca.verifyPcactn(salt, root, NOW, AUD);
+        assertEquals("intent: " + I_OPEN, g.reason);
+        for (String k : BASE_KEYS) assertEquals(Boolean.TRUE, g.checks.get(k), k);
+        // wire refusals through the verifier are terminal (wire only)
+        for (Object bad : new Object[] {null, "x", new ArrayList<>(), slotWith("fidelity_ppm", n("1000001")), slotWith("residual_risk_ppm", n("-1")), slotWith("goal_salt", "é".repeat(64) + "a")}) {
+            Map<String, Object> w = signedWithIntent(root, intentSlot());
+            w.put("intent", bad);
+            g = Pca.verifyPcactn(w, root, NOW, AUD, null, Pca.IntentPolicy.required());
+            assertFalse(g.allow);
+            assertEquals(List.of("wire"), new ArrayList<>(g.checks.keySet()), String.valueOf(bad));
+            assertTrue(g.reason.startsWith("wire: "), g.reason);
+        }
+    }
+
+    @Test void intentKillThresholdNumericValue() throws Exception {
+        // validity is judged on the NUMERIC value, whatever the JSON spelling
+        for (String ok : List.of("950000", "950000.0", "950000.00", "9.5e5", "1e6", "1E6", "1e+6", "10e5", "0", "0.0", "0e0", "9007199254740991", "9007199254740991.0")) {
+            Pca.IntentPolicy pol = Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":" + ok + ",\"max_residual_risk_ppm\":" + ok + "}");
+            assertTrue(pol.isActive(), ok);
+            assertTrue(Pca.okThreshold(pol.minFidelityPpm), ok);
+            assertTrue(Pca.okThreshold(pol.maxResidualRiskPpm), ok);
+        }
+        assertEquals(950000.0, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.0}").minFidelityPpm);
+        assertEquals(1000000.0, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":1e6}").minFidelityPpm);
+        for (String bad : List.of("950000.5", "0.5", "-1", "-1.0", "-0", "-0.0", "-0e0", "1e400", "-1e400", "9007199254740992", "1e16", "1e-7", "null", "true", "false", "\"5\"", "[]", "{}")) {
+            Pca.IntentPolicy pol = Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":" + bad + "}");
+            assertTrue(pol.isActive(), bad);
+            assertFalse(Pca.okThreshold(pol.minFidelityPpm), bad);
+            assertEquals(I_MIS, decide(intentSlot(), grantOf(envelope(INTENT_COMMIT)), pol), bad);
+            assertEquals(I_MIS, decide(intentSlot(), grantOf(envelope(INTENT_COMMIT)), Pca.IntentPolicy.fromJsonText("{\"max_residual_risk_ppm\":" + bad + "}")), bad);
+        }
+        assertTrue(Pca.okThreshold(950000.0));
+        assertTrue(Pca.okThreshold(1e6));
+        assertFalse(Pca.okThreshold(950000.5));
+        assertNull(Pca.IntentPolicy.fromJsonText("[]"));
+        assertNull(Pca.IntentPolicy.fromJsonText("null"));
+        assertFalse(Pca.IntentPolicy.fromJsonText("{}").isActive());
+        assertTrue(Pca.IntentPolicy.fromJsonText("{\"require\":true}").isActive());
+        // through the decision: 950000.0 is the inclusive floor 950000; 1e6 is 1000000
+        Map<String, Object> g = grantOf(envelope(INTENT_COMMIT));
+        assertEquals("", decide(intentSlot(), g, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.0}")));
+        assertEquals("", decide(intentSlot(), g, Pca.IntentPolicy.fromJsonText("{\"max_residual_risk_ppm\":4.31e6}")));
+        assertEquals("intent fidelity 950000 ppm is below the policy minimum 1000000", decide(intentSlot(), g, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":1e6}")));
+        assertEquals("intent residual risk 4310000 ppm exceeds the policy maximum 4309999", decide(intentSlot(), g, Pca.IntentPolicy.fromJsonText("{\"max_residual_risk_ppm\":4309999.0}")));
+        // and through the signed verifier
+        Map<String, Object> root = intentRoot();
+        Map<String, Object> p = signedWithIntent(root, intentSlot());
+        assertTrue(Pca.verifyPcactn(p, root, NOW, AUD, null, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.0,\"max_residual_risk_ppm\":4.31e6}")).allow);
+        Pca.Verdict v = Pca.verifyPcactn(p, root, NOW, AUD, null, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.5}"));
+        assertFalse(v.allow);
+        assertEquals("intent: " + I_MIS, v.reason);
+        assertThrows(RuntimeException.class, () -> Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":}"));
+    }
 }

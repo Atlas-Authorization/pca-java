@@ -60,7 +60,8 @@ public class R041Test {
         assertEquals("'pq_sig' must be absent for alg 'ml-dsa-65'",
             Pq.validateShareSignatureWire(share("alg", "ml-dsa-65", "sig", b(3309), "pq_sig", b(3309))));
         assertEquals("'pq_sig' must be absent for alg 'ed25519'", Pq.validateShareSignatureWire(share("sig", b(64), "pq_sig", null)));
-        assertEquals("unknown signature alg 'ml-dsa-87'", Pq.validateShareSignatureWire(share("alg", "ml-dsa-87", "sig", b(4627))));
+        assertNull(Pq.validateShareSignatureWire(share("alg", "ml-dsa-87", "sig", b(4627)))); // implemented since 0.4.2
+        assertEquals("unknown signature alg 'ml-dsa-44'", Pq.validateShareSignatureWire(share("alg", "ml-dsa-44", "sig", b(4627))));
         assertEquals("'alg' must be a string", Pq.validateShareSignatureWire(share("alg", n("1"), "sig", b(64))));
         assertEquals("'alg' must be a string", Pq.validateShareSignatureWire(share("alg", null, "sig", b(64))));
         assertNotNull(Pq.validateShareSignatureWire(share("alg", "ml-dsa-65", "sig", b(3309) + "=")));

@@ -1,5 +1,8 @@
 package net.atlasauth.pca.servlet;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
@@ -48,9 +51,20 @@ public final class PcaCore {
 
         if (body != null && body.length > 0) {
             // Body transport: {"pcactn": <PCActn>}.
+            // STRICT UTF-8 (REPORT), the same decoder the header path uses: `new String(bytes, UTF_8)` silently replaced
+            // malformed sequences with U+FFFD, so byte-distinct bodies decoded to the same text. Invalid UTF-8 => 401.
+            String bodyText;
+            try {
+                bodyText = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(body)).toString();
+            } catch (CharacterCodingException e) {
+                return PcaResult.of(PcaResult.Outcome.UNDECODABLE, "request body is not valid UTF-8");
+            }
             Object env;
             try {
-                env = Json.parse(new String(body, StandardCharsets.UTF_8));
+                env = Json.parse(bodyText);
             } catch (RuntimeException e) {
                 return PcaResult.of(PcaResult.Outcome.UNDECODABLE, "request body is not strict JSON: " + e.getMessage());
             }
