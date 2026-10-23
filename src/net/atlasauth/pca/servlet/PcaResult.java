@@ -66,16 +66,15 @@ public final class PcaResult {
         }
     }
 
-    /** The {@code WWW-Authenticate} value: {@code PCA realm="pca"} plus error/description when there is one. */
+    /**
+     * The {@code WWW-Authenticate} value: {@code PCA realm="pca"} plus the static {@code error} token when there is one.
+     * The description is NOT emitted: it can carry request-derived text (the verdict reason, a JSON parse error) and so
+     * must never reach a header (CR/LF header injection); TS {@code requirePCA} puts no reason in its challenge either.
+     * The description stays in {@link #jsonBody()} (JSON-escaped).
+     */
     public String wwwAuthenticate() {
-        StringBuilder sb = new StringBuilder("PCA realm=\"pca\"");
         String err = error();
-        if (err != null) {
-            sb.append(", error=\"").append(err).append('"');
-            String desc = description();
-            if (!desc.isEmpty()) sb.append(", error_description=\"").append(quote(desc)).append('"');
-        }
-        return sb.toString();
+        return err == null ? "PCA realm=\"pca\"" : "PCA realm=\"pca\", error=\"" + err + '"';
     }
 
     /** A compact JSON error body. */
@@ -93,9 +92,6 @@ public final class PcaResult {
             return verdict.reason;
         return detail;
     }
-
-    /** RFC 7235 quoted-string escaping (backslash + double-quote) for a header value. */
-    private static String quote(String s) { return s.replace("\\", "\\\\").replace("\"", "\\\""); }
 
     private static String jsonEscape(String s) {
         StringBuilder b = new StringBuilder(s.length() + 8);

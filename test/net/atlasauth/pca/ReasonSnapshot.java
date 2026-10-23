@@ -46,6 +46,45 @@ public final class ReasonSnapshot {
         return (Map<String, Object>) Json.parseLenient(Files.readString(Path.of(DIR + name)));
     }
 
+    /** The pinned verdict text of one Intent Layer v2 primitive (reasons included). */
+    @SuppressWarnings("unchecked")
+    static String intentPrimitive(String kind, Object input) {
+        switch (kind) {
+            case "intent_schema": {
+                Map<String, Object> in = (Map<String, Object>) IntentJs.normalize(input);
+                String sig = ActionSchema.verify(in.get("schema"), in.get("keys"));
+                ActionSchema.Conform c = ActionSchema.conform(in.get("schema"), (String) in.get("verb"), in.get("params"));
+                return sig + "|" + (sig == null ? ActionSchema.digest(in.get("schema")) : "") + "|" + c.ok + "|" + c.code + "|" + c.path + "|" + c.reason;
+            }
+            case "intent_revocation":
+                return String.valueOf(IntentRevocation.checkPrimitive(input));
+            case "intent_world": {
+                OracleFacts.WorldResult r = OracleFacts.decideIntentWorld(input);
+                return r.ok + "|" + r.reason + "|" + (r.ok ? Json.canonicalize(r.world) + "|" + r.singleSource : "");
+            }
+            case "intent_provenance": {
+                ParamProvenance.ProvResult r = ParamProvenance.decide(input);
+                return r.outcome + "|" + r.reason + "|" + r.friction + "|" + Json.canonicalize(r.labels) + "|" + Json.canonicalize(r.classes) + "|" + Json.canonicalize(r.env);
+            }
+            case "intent_wb_active":
+                return java.util.Arrays.toString(IntentWB.active(input));
+            case "intent_read_purpose": {
+                ParamProvenance.ReadPurposeResult r = ParamProvenance.decideReadPurpose(input);
+                return r.outcome + "|" + r.minimise + "|" + r.uncovered;
+            }
+            case "intent_map_commit":
+                return IntentMap.commitLeaves(((Map<String, Object>) input).get("leaves"));
+            case "intent_map": {
+                IntentMap.Decision d = IntentMap.decidePrimitive(input);
+                return d.ok + "|" + d.reason + "|" + (d.ok ? d.cell + "|" + d.pPpm + "|" + d.residualRiskPpm : "");
+            }
+            default: {
+                IntentClassifier.ClassResult r = IntentClassifier.decide(input);
+                return r.ok + "|" + r.reason + "|" + (r.ok ? Json.canonicalize(r.classes) : "");
+            }
+        }
+    }
+
     /** One line per vector / primitive: key TAB value. */
     @SuppressWarnings("unchecked")
     static Map<String, String> compute(Map<String, Object> doc, String tag, int k, int step) {
@@ -61,9 +100,11 @@ public final class ReasonSnapshot {
             }
             String val;
             try {
+                Pca.IntentPolicy ip = (ctx.get("intent_policy_json") instanceof String ? Pca.IntentPolicy.fromJsonText((String) ctx.get("intent_policy_json")) : Pca.IntentPolicy.fromJson(ctx.get("intent_policy")));
+                IntentV2.Context v2 = (ctx.containsKey("intent_v2") ? IntentV2.Context.fromJson(ctx.get("intent_v2")) : null);
                 Pca.Verdict g = v.containsKey("pcactn_json")
-                    ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed)
-                    : Pca.verifyPcactn(v.get("pcactn"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed);
+                    ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed, ip, v2)
+                    : Pca.verifyPcactn(v.get("pcactn"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed, ip, v2);
                 val = g.allow + "|" + g.checks + "|" + esc(g.reason);
             } catch (Throwable t) { val = "THROW:" + t.getClass().getSimpleName() + ":" + esc(t.getMessage()); }
             out.put(tag + ":v:" + v.get("name"), val);
@@ -106,6 +147,17 @@ public final class ReasonSnapshot {
                 String len;
                 try { len = Json.canonicalize(value) + "|" + Pca.hashCanonical(value); } catch (Throwable t) { len = "ERR:" + esc(t.getMessage()); }
                 out.put(tag + ":cn:" + (n++), esc(val) + "|" + esc(len));
+            }
+            // Intent Layer v2 primitives: the verdict with its reason (rules 13 step 7, 14, 16, 17, 18)
+            for (String kind : List.of("intent_schema", "intent_revocation", "intent_world", "intent_provenance", "intent_classifier", "intent_wb_active", "intent_map_commit", "intent_map", "intent_read_purpose")) {
+                if (!(prim.get(kind) instanceof List)) continue;
+                for (Object x : (List<Object>) prim.get(kind)) {
+                    Map<String, Object> e = (Map<String, Object>) x;
+                    String val;
+                    try { val = intentPrimitive(kind, e.get("input_json") instanceof String ? Json.parseLenient((String) e.get("input_json")) : e.get("input")); }
+                    catch (Throwable t) { val = "THROW:" + t.getClass().getSimpleName() + ":" + esc(t.getMessage()); }
+                    out.put(tag + ":iv2:" + kind + ":" + e.get("name"), esc(val));
+                }
             }
             n = 0;
             if (prim.get("b64u") != null) for (Object x : (List<Object>) prim.get("b64u")) {
@@ -150,7 +202,10 @@ public final class ReasonSnapshot {
                         for (Object o : (List<Object>) c.get("allowed_suites")) allowed.add(String.valueOf(o));
                     }
                     Map<String, Object> grant = (Map<String, Object>) Json.parseLenient((String) c.get("grant"));
-                    Pca.Verdict g = Pca.verifyPcactnJson(raw, grant, Json.asLong(c.get("now")), (String) c.get("aud"), allowed);
+                    Pca.Verdict g = Pca.verifyPcactnJson(raw, grant, Json.asLong(c.get("now")), (String) c.get("aud"), allowed,
+                        c.get("intent_policy_json") instanceof String ? Pca.IntentPolicy.fromJsonText((String) c.get("intent_policy_json"))
+                            : Pca.IntentPolicy.fromJson(c.get("intent_policy")),
+                        (c.containsKey("intent_v2") ? IntentV2.Context.fromJson(c.get("intent_v2")) : null));
                     val = g.allow + "|" + g.checks + "|" + esc(g.reason);
                 } catch (Throwable t) { val = "THROW:" + t.getClass().getSimpleName() + ":" + esc(t.getMessage()); }
             } else {

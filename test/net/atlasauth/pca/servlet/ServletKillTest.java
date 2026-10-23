@@ -79,7 +79,7 @@ public class ServletKillTest {
         PcaResult u = PcaResult.of(PcaResult.Outcome.UNDECODABLE, "bad \"x\" \\ y");
         assertEquals(401, u.status());
         assertEquals("invalid_request", u.error());
-        assertEquals("PCA realm=\"pca\", error=\"invalid_request\", error_description=\"bad \\\"x\\\" \\\\ y\"", u.wwwAuthenticate());
+        assertEquals("PCA realm=\"pca\", error=\"invalid_request\"", u.wwwAuthenticate());
         assertEquals("{\"error\":\"invalid_request\",\"error_description\":\"bad \\\"x\\\" \\\\ y\"}", u.jsonBody());
         assertEquals("PCA realm=\"pca\", error=\"invalid_request\"", PcaResult.of(PcaResult.Outcome.UNDECODABLE, "").wwwAuthenticate());
         assertEquals("{\"error\":\"invalid_request\"}", PcaResult.of(PcaResult.Outcome.UNDECODABLE, "").jsonBody());
@@ -87,7 +87,7 @@ public class ServletKillTest {
         PcaResult g = PcaResult.of(PcaResult.Outcome.UNKNOWN_GRANT, "nogrant");
         assertEquals(401, g.status());
         assertEquals("invalid_grant", g.error());
-        assertEquals("PCA realm=\"pca\", error=\"invalid_grant\", error_description=\"nogrant\"", g.wwwAuthenticate());
+        assertEquals("PCA realm=\"pca\", error=\"invalid_grant\"", g.wwwAuthenticate());
         assertEquals("{\"error\":\"invalid_grant\",\"error_description\":\"nogrant\"}", g.jsonBody());
 
         Pca.Verdict v = net.atlasauth.pca.VerdictFactory.empty();
@@ -97,10 +97,10 @@ public class ServletKillTest {
         assertSame(v, d.verdict());
         assertEquals("pc", d.pcactn());
         // verdict reason wins for DENIED when present, else detail
-        assertEquals("PCA realm=\"pca\", error=\"insufficient_authority\", error_description=\"detail-text\"", d.wwwAuthenticate());
+        assertEquals("PCA realm=\"pca\", error=\"insufficient_authority\"", d.wwwAuthenticate());
         v = net.atlasauth.pca.VerdictFactory.failed("audience", "aud \"q\"");
         d = new PcaResult(PcaResult.Outcome.DENIED, v, "pc", "detail-text");
-        assertEquals("PCA realm=\"pca\", error=\"insufficient_authority\", error_description=\"audience: aud \\\"q\\\"\"", d.wwwAuthenticate());
+        assertEquals("PCA realm=\"pca\", error=\"insufficient_authority\"", d.wwwAuthenticate());
         assertEquals("{\"error\":\"insufficient_authority\",\"error_description\":\"audience: aud \\\"q\\\"\"}", d.jsonBody());
         // a verdict reason is ignored for non-DENIED outcomes
         PcaResult ok = new PcaResult(PcaResult.Outcome.ALLOW, v, "pc", "okdetail");
@@ -121,10 +121,10 @@ public class ServletKillTest {
     @Test void jsonEscaping() {
         PcaResult r = PcaResult.of(PcaResult.Outcome.UNDECODABLE, "a\"b\\c\nd\re\tf\u0001g\u001fh \u007fé");
         assertEquals("{\"error\":\"invalid_request\",\"error_description\":\"a\\\"b\\\\c\\nd\\re\\tf\\u0001g\\u001fh \u007fé\"}", r.jsonBody());
-        assertEquals("PCA realm=\"pca\", error=\"invalid_request\", error_description=\"a\\\"b\\\\c\nd\re\tf\u0001g\u001fh \u007fé\"", r.wwwAuthenticate());
+        // 0.4.2 audit: request-derived text (CR/LF included) never reaches the header
+        assertEquals("PCA realm=\"pca\", error=\"invalid_request\"", r.wwwAuthenticate());
         // the backslash is escaped before the quote (no double escaping of the quote's backslash)
         assertEquals("{\"error\":\"invalid_request\",\"error_description\":\"\\\\\\\"\"}", PcaResult.of(PcaResult.Outcome.UNDECODABLE, "\\\"").jsonBody());
-        assertEquals("PCA realm=\"pca\", error=\"invalid_request\", error_description=\"\\\\\\\"\"", PcaResult.of(PcaResult.Outcome.UNDECODABLE, "\\\"").wwwAuthenticate());
         String longMsg = "x".repeat(500);
         assertEquals("{\"error\":\"invalid_request\",\"error_description\":\"" + longMsg + "\"}", PcaResult.of(PcaResult.Outcome.UNDECODABLE, longMsg).jsonBody());
         assertEquals("{\"error\":\"invalid_request\",\"error_description\":\"\\t\\t\\t\\t\\t\\t\\t\\t\\t\\t\\t\"}", PcaResult.of(PcaResult.Outcome.UNDECODABLE, "\t".repeat(11)).jsonBody());
@@ -178,6 +178,17 @@ public class ServletKillTest {
         assertEquals("no \"pcactn\" field in request body", r.detail());
         r = PcaCore.authorize(null, new byte[1], aud, now, res);
         assertEquals(PcaResult.Outcome.UNDECODABLE, r.outcome());
+        // 0.4.2 audit: invalid UTF-8 in the body is REJECTED (strict decoder, as the header path), never replaced by U+FFFD
+        byte[] bad = "{\"pcactn\":{\"grant_ref\":\"__\"}}".getBytes(StandardCharsets.UTF_8);
+        bad[24] = (byte) 0xff; bad[25] = (byte) 0xfe;
+        String[] seenBad = new String[1];
+        r = PcaCore.authorize(null, bad, aud, now, ref -> { seenBad[0] = ref; return null; });
+        assertEquals(PcaResult.Outcome.UNDECODABLE, r.outcome());
+        assertEquals("request body is not valid UTF-8", r.detail());
+        assertNull(seenBad[0]);
+        // an overlong encoding ("/" as C0 AF) and a lone surrogate (ED A0 80) are refused too
+        assertEquals("request body is not valid UTF-8", PcaCore.authorize(null, new byte[] {'{', (byte) 0xC0, (byte) 0xAF, '}'}, aud, now, res).detail());
+        assertEquals("request body is not valid UTF-8", PcaCore.authorize(null, new byte[] {'{', (byte) 0xED, (byte) 0xA0, (byte) 0x80, '}'}, aud, now, res).detail());
         // grant resolution
         r = PcaCore.authorize(null, "{\"pcactn\":\"x\"}".getBytes(), aud, now, res);
         assertEquals(PcaResult.Outcome.UNKNOWN_GRANT, r.outcome());
@@ -313,7 +324,7 @@ public class ServletKillTest {
             assertEquals(401, resp.getStatus());
             assertTrue(resp.getContentAsString().contains("not canonical base64url"), resp.getContentAsString());
         }
-        // reader honours the declared encoding, falls back to UTF-8 for unknown names
+        // the PCActn body is UTF-8 only (0.4.2 audit: strict decoder): a Latin-1 body (é = lone 0xE9) is refused, 401
         MockHttpServletRequest req = new MockHttpServletRequest();
         StringBuilder asc = new StringBuilder();
         for (char ch : json.toCharArray()) asc.append(ch < 0x80 ? String.valueOf(ch) : String.format("\\u%04x", (int) ch));
@@ -323,9 +334,20 @@ public class ServletKillTest {
         MockFilterChain chain = new MockFilterChain();
         MockHttpServletResponse r1 = new MockHttpServletResponse();
         new PcaFilter(aud, resolver(), clock).doFilter(req, r1, chain);
+        assertNull(chain.getRequest());
+        assertEquals(401, r1.getStatus());
+        assertTrue(r1.getContentAsString().contains("request body is not valid UTF-8"), r1.getContentAsString());
+        // the downstream reader honours the declared encoding (UTF-8 bytes of é read as ISO-8859-1 are "Ã©"), falls back
+        // to UTF-8 for unknown names
+        req = new MockHttpServletRequest();
+        req.setContent(("{\"pcactn\":" + asc + ",\"x\":\"é\"}").getBytes(StandardCharsets.UTF_8));
+        req.setCharacterEncoding("ISO-8859-1");
+        chain = new MockFilterChain();
+        r1 = new MockHttpServletResponse();
+        new PcaFilter(aud, resolver(), clock).doFilter(req, r1, chain);
         HttpServletRequest down = (HttpServletRequest) chain.getRequest();
         assertNotNull(down, r1.getContentAsString());
-        assertTrue(down.getReader().lines().collect(java.util.stream.Collectors.joining("\n")).endsWith("\"x\":\"é\"}"));
+        assertTrue(down.getReader().lines().collect(java.util.stream.Collectors.joining("\n")).endsWith("\"x\":\"\u00c3\u00a9\"}"));
         req = new MockHttpServletRequest();
         req.setContent(("{\"pcactn\":" + json + ",\"x\":\"é\"}").getBytes(StandardCharsets.UTF_8));
         req.setCharacterEncoding("bogus-charset");
@@ -369,7 +391,7 @@ public class ServletKillTest {
         resp = new MockHttpServletResponse();
         new PcaFilter("other", resolver(), clock).doFilter(req, resp, new MockFilterChain());
         assertEquals(403, resp.getStatus());
-        assertEquals("PCA realm=\"pca\", error=\"insufficient_authority\", error_description=\"audience: aud does not match this resource server / instance\"", resp.getHeader("WWW-Authenticate"));
+        assertEquals("PCA realm=\"pca\", error=\"insufficient_authority\"", resp.getHeader("WWW-Authenticate"));
         // multi-byte detail: the content length counts bytes
         req = new MockHttpServletRequest();
         resp = new MockHttpServletResponse();

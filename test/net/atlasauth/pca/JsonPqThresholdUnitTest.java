@@ -257,16 +257,19 @@ public class JsonPqThresholdUnitTest {
     // ------------------------------------------------------------------ Pq
     @Test void suites() {
         Pq.Suite ed = Pq.resolveSigAlg(null, false);
-        assertEquals("ed25519", ed.alg); assertEquals(64, ed.sigBytes); assertTrue(ed.hasEd25519); assertFalse(ed.hasMlDsa); assertFalse(ed.needsPqPk); assertFalse(ed.needsPqSig);
+        assertEquals("ed25519", ed.alg); assertEquals(64, ed.sigBytes); assertTrue(ed.hasEd25519); assertNull(ed.pq); assertFalse(ed.needsPqPk); assertFalse(ed.needsPqSig);
         assertEquals("ed25519", Pq.resolveSigAlg("ed25519", true).alg);
         Pq.Suite ml = Pq.resolveSigAlg("ml-dsa-65", true);
-        assertEquals("ml-dsa-65", ml.alg); assertEquals(3309, ml.sigBytes); assertFalse(ml.hasEd25519); assertTrue(ml.hasMlDsa); assertTrue(ml.needsPqPk); assertFalse(ml.needsPqSig);
+        assertEquals("ml-dsa-65", ml.alg); assertEquals(3309, ml.sigBytes); assertFalse(ml.hasEd25519); assertEquals(Pq.Prim.ML_DSA_65, ml.pq); assertTrue(ml.needsPqPk); assertFalse(ml.needsPqSig);
         Pq.Suite hy = Pq.resolveSigAlg("hybrid-ed25519-ml-dsa-65", true);
-        assertEquals("hybrid-ed25519-ml-dsa-65", hy.alg); assertEquals(64, hy.sigBytes); assertTrue(hy.hasEd25519); assertTrue(hy.hasMlDsa); assertTrue(hy.needsPqPk); assertTrue(hy.needsPqSig);
-        assertNull(Pq.resolveSigAlg("ml-dsa-87", true));
+        assertEquals("hybrid-ed25519-ml-dsa-65", hy.alg); assertEquals(64, hy.sigBytes); assertTrue(hy.hasEd25519); assertEquals(Pq.Prim.ML_DSA_65, hy.pq); assertTrue(hy.needsPqPk); assertTrue(hy.needsPqSig);
+        assertEquals(Pq.Prim.ML_DSA_87, Pq.resolveSigAlg("ml-dsa-87", true).pq);
+        assertNull(Pq.resolveSigAlg("fn-dsa-512", true)); // registered, not implemented: unsupported_suite
+        assertEquals("unsupported_suite: fn-dsa-512", Pq.refusal("fn-dsa-512"));
+        assertEquals("unknown signature alg 'ml-dsa-99'", Pq.refusal("ml-dsa-99"));
         assertNull(Pq.resolveSigAlg(5, true));
         assertNull(Pq.resolveSigAlg(null, true));
-        assertEquals(3, Pq.SUITES.size());
+        assertEquals(LessNative.available() ? 12 : 10, Pq.SUITES.size()); // ed25519 + every registered suite BC implements (+ LESS with libatlas_less)
         assertEquals(1952, Pq.ML_DSA_65_PUBLIC_KEY_BYTES);
         assertEquals(3309, Pq.ML_DSA_65_SIGNATURE_BYTES);
         assertEquals(64, Pq.ED25519_SIGNATURE_BYTES);
@@ -424,10 +427,10 @@ public class JsonPqThresholdUnitTest {
 
     // ------------------------------------------------------------------ additions (round 2)
     @Test void suiteConstructor() {
-        Pq.Suite s = new Pq.Suite("a", 5, true, false, true, false);
-        assertEquals("a", s.alg); assertEquals(5, s.sigBytes); assertTrue(s.hasEd25519); assertFalse(s.hasMlDsa); assertTrue(s.needsPqPk); assertFalse(s.needsPqSig);
-        Pq.Suite t = new Pq.Suite("b", 7, false, true, false, true);
-        assertEquals("b", t.alg); assertEquals(7, t.sigBytes); assertFalse(t.hasEd25519); assertTrue(t.hasMlDsa); assertFalse(t.needsPqPk); assertTrue(t.needsPqSig);
+        Pq.Suite s = new Pq.Suite("a", 5, true, null, true, false, true);
+        assertEquals("a", s.alg); assertEquals(5, s.sigBytes); assertTrue(s.hasEd25519); assertNull(s.pq); assertTrue(s.needsPqPk); assertFalse(s.needsPqSig); assertTrue(s.nested);
+        Pq.Suite t = new Pq.Suite("b", 7, false, Pq.Prim.SLH_DSA_SHA2_256S, false, true, false);
+        assertEquals("b", t.alg); assertEquals(7, t.sigBytes); assertFalse(t.hasEd25519); assertEquals(Pq.Prim.SLH_DSA_SHA2_256S, t.pq); assertFalse(t.needsPqPk); assertTrue(t.needsPqSig); assertFalse(t.nested);
     }
 
     @Test void resolveKey() {
