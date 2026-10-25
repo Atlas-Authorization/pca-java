@@ -1,4 +1,13 @@
+import net.atlasauth.pca.ActionSchema;
 import net.atlasauth.pca.Caveats;
+import net.atlasauth.pca.IntentClassifier;
+import net.atlasauth.pca.IntentJs;
+import net.atlasauth.pca.IntentMap;
+import net.atlasauth.pca.IntentRevocation;
+import net.atlasauth.pca.IntentV2;
+import net.atlasauth.pca.IntentWB;
+import net.atlasauth.pca.OracleFacts;
+import net.atlasauth.pca.ParamProvenance;
 import net.atlasauth.pca.Json;
 import net.atlasauth.pca.Pca;
 import net.atlasauth.pca.Pq;
@@ -34,13 +43,117 @@ public class ConformanceTest {
     static final String DIR = "conformance/";
     static int fails = 0, checks = 0;
 
-    /** The suites this verifier implements — the three cross-impl suites required at parity (GAP 1). */
-    static final Set<String> IMPLEMENTED_SUITES = Set.of("ed25519", "ml-dsa-65", "hybrid-ed25519-ml-dsa-65");
-    /** Every registered suite in the corpus (README: 10 suites). */
-    static final Set<String> ALL_REGISTERED_SUITES = Set.of(
-        "ed25519", "ml-dsa-65", "ml-dsa-87", "hybrid-ed25519-ml-dsa-65", "hybrid-ed25519-ml-dsa-87",
-        "hybrid-nested-ed25519-ml-dsa-65", "slh-dsa-sha2-128f", "slh-dsa-sha2-256s",
-        "hybrid-ed25519-slh-dsa-sha2-128f", "hybrid-ed25519-slh-dsa-sha2-256s");
+    /** The suites this verifier implements: its capability manifest (packages/pca/conformance/SUITES.md). */
+    static final Set<String> IMPLEMENTED_SUITES = Set.copyOf(Pq.supportedSuites());
+    /** Every registered suite (the TS registry). A vector needing one outside the manifest must fail with unsupported_suite. */
+    static final Set<String> ALL_REGISTERED_SUITES = Set.copyOf(Pq.REGISTERED_SUITES);
+
+    static String canonOf(Object o) { return Json.canonicalize(o); }
+
+    /** A primitive's input: {@code input_json} (raw JSON text, parsed with this SDK's parser) takes precedence over {@code input}. */
+    static Object inputOf(Map<String, Object> e) {
+        return e.get("input_json") instanceof String ? Json.parseLenient((String) e.get("input_json")) : e.get("input");
+    }
+
+    /** The first suite a v2 vector's {@code requires_suite} (a string or a list) names that this verifier does not implement, else null. */
+    static String missingRequiredSuite(Object rs) {
+        if (rs instanceof String) return IMPLEMENTED_SUITES.contains(rs) ? null : (String) rs;
+        if (rs instanceof List) for (Object s : (List<?>) rs) if (s instanceof String && !IMPLEMENTED_SUITES.contains(s)) return (String) s;
+        return null;
+    }
+
+    /** The refusal reason of an Intent Layer v2 primitive (null when it passes). */
+    @SuppressWarnings("unchecked")
+    static String intentPrimitiveReason(String kind, Object input) {
+        switch (kind) {
+            case "intent_schema": {
+                Map<String, Object> in = (Map<String, Object>) IntentJs.normalize(input);
+                String v = ActionSchema.verify(in.get("schema"), in.get("keys"));
+                return v != null ? v : ActionSchema.conform(in.get("schema"), (String) in.get("verb"), in.get("params")).reason;
+            }
+            case "intent_revocation": return IntentRevocation.primitiveReason(input);
+            case "intent_world": return OracleFacts.decideIntentWorld(input).reason;
+            case "intent_provenance": return ParamProvenance.decide(input).reason;
+            case "intent_classifier": return IntentClassifier.decide(input).reason;
+            case "intent_map": return IntentMap.decidePrimitive(input).reason;
+            case "intent_read_purpose": return null;
+            default: return null;
+        }
+    }
+
+    /**
+     * The Intent Layer v2 primitive verdicts compared exactly as the README says: intent_schema {sig, digest when sig,
+     * conform {ok, code?, path?}}; intent_revocation {ok}; intent_world ok (+ world, single_source when ok); intent_provenance
+     * outcome (+ labels, classes unless deny, friction for a question); intent_classifier ok (+ classes when ok); intent_wb_active
+     * {facts, provenance, classes}. Null = match.
+     */
+    @SuppressWarnings("unchecked")
+    static String intentPrimitiveMismatch(String kind, Object input, Map<String, Object> exp) {
+        switch (kind) {
+            case "intent_schema": {
+                Map<String, Object> in = (Map<String, Object>) IntentJs.normalize(input);
+                boolean sig = ActionSchema.verify(in.get("schema"), in.get("keys")) == null;
+                if (sig != (Boolean) exp.get("sig")) return "sig=" + sig;
+                if (sig && !ActionSchema.digest(in.get("schema")).equals(exp.get("digest"))) return "digest";
+                ActionSchema.Conform c = ActionSchema.conform(in.get("schema"), (String) in.get("verb"), in.get("params"));
+                Map<String, Object> wc = (Map<String, Object>) exp.get("conform");
+                if (c.ok != (Boolean) wc.get("ok")) return "conform.ok=" + c.ok + " (" + c.code + ")";
+                if (!c.ok && !c.code.equals(wc.get("code"))) return "conform.code=" + c.code;
+                if (!c.ok && !java.util.Objects.equals(c.path, wc.get("path"))) return "conform.path=" + c.path;
+                return null;
+            }
+            case "intent_revocation": {
+                boolean ok = IntentRevocation.checkPrimitive(input);
+                return ok == (Boolean) exp.get("ok") ? null : "ok=" + ok;
+            }
+            case "intent_world": {
+                OracleFacts.WorldResult r = OracleFacts.decideIntentWorld(input);
+                if (r.ok != (Boolean) exp.get("ok")) return "ok=" + r.ok + " (" + r.reason + ")";
+                if (r.ok && !canonOf(r.world).equals(canonOf(exp.get("world")))) return "world=" + canonOf(r.world);
+                if (r.ok && !canonOf(r.singleSource).equals(canonOf(exp.get("single_source")))) return "single_source=" + r.singleSource;
+                return null;
+            }
+            case "intent_provenance": {
+                ParamProvenance.ProvResult r = ParamProvenance.decide(input);
+                if (!r.outcome.equals(exp.get("outcome"))) return "outcome=" + r.outcome + " (" + r.reason + ")";
+                if (r.outcome.equals("deny")) return null;
+                if (!canonOf(r.labels).equals(canonOf(exp.get("labels")))) return "labels=" + canonOf(r.labels);
+                if (!canonOf(r.classes).equals(canonOf(exp.get("classes")))) return "classes=" + canonOf(r.classes);
+                if (r.outcome.equals("question") && !r.friction.equals(exp.get("friction"))) return "friction=" + r.friction;
+                return null;
+            }
+            case "intent_wb_active": {
+                boolean[] a = IntentWB.active(input);
+                return a[0] == (Boolean) exp.get("facts") && a[1] == (Boolean) exp.get("provenance") && a[2] == (Boolean) exp.get("classes")
+                    ? null : "active=" + java.util.Arrays.toString(a);
+            }
+            case "intent_read_purpose": {
+                ParamProvenance.ReadPurposeResult r = ParamProvenance.decideReadPurpose(input);
+                Map<String, Object> got = new java.util.LinkedHashMap<>();
+                got.put("outcome", r.outcome);
+                got.put("minimise", r.minimise);
+                got.put("uncovered", r.uncovered);
+                return canonOf(got).equals(canonOf(exp)) ? null : "got " + canonOf(got);
+            }
+            case "intent_map_commit": {
+                String c = IntentMap.commitLeaves(((Map<String, Object>) input).get("leaves"));
+                return c.equals(exp.get("map_commit")) ? null : "map_commit=" + c;
+            }
+            case "intent_map": {
+                IntentMap.Decision d = IntentMap.decidePrimitive(input);
+                if (d.ok != (Boolean) exp.get("ok")) return "ok=" + d.ok + " (" + d.reason + ")";
+                if (d.ok && !canonOf(d.cell).equals(canonOf(exp.get("cell")))) return "cell=" + d.cell;
+                if (d.ok && d.pPpm != Json.asLong(exp.get("p_ppm"))) return "p_ppm=" + d.pPpm;
+                return null;
+            }
+            default: {
+                IntentClassifier.ClassResult r = IntentClassifier.decide(input);
+                if (r.ok != (Boolean) exp.get("ok")) return "ok=" + r.ok + " (" + r.reason + ")";
+                if (r.ok && !canonOf(r.classes).equals(canonOf(exp.get("classes")))) return "classes=" + canonOf(r.classes);
+                return null;
+            }
+        }
+    }
 
     static void check(boolean ok, String msg) {
         checks++;
@@ -158,6 +271,13 @@ public class ConformanceTest {
                 skipped++;
                 skipBySuite.merge(unsupported, 1, Integer::sum);
                 System.out.println("SKIP " + v.get("name") + " (unimplemented suite: " + unsupported + ")");
+                if (v.get("pcactn") instanceof Map) {
+                    Map<String, Object> uctx = (Map<String, Object>) v.get("context");
+                    Pca.Verdict ug = Pca.verifyPcactn(v.get("pcactn"), (Map<String, Object>) v.get("grant"), Json.asLong(uctx.get("now")),
+                        (String) uctx.get("aud"), null, null, null);
+                    check(!ug.allow && ug.reason.contains(Pq.UNSUPPORTED_SUITE), v.get("name") + ": suite " + unsupported
+                        + " is not implemented, so it must fail with unsupported_suite (" + ug.reason + ")");
+                }
                 continue;
             }
 
@@ -171,10 +291,24 @@ public class ConformanceTest {
             long now = Json.asLong(ctx.get("now"));
             String aud = (String) ctx.get("aud");
             Map<String, Object> grant = (Map<String, Object>) v.get("grant");
+            // Intent Layer M2: `intent-*` vectors may carry context.intent_policy (an object) or context.intent_policy_json
+            // (raw JSON text, parsed with this SDK's parser; it wins when both are present). Absent = no policy.
+            Pca.IntentPolicy intentPolicy = (ctx.get("intent_policy_json") instanceof String ? Pca.IntentPolicy.fromJsonText((String) ctx.get("intent_policy_json")) : Pca.IntentPolicy.fromJson(ctx.get("intent_policy")));
+            // Intent Layer v2: `schema-*` / `session-*` / `acc-*` / `layers-*` vectors carry the verifier state in context.intent_v2.
+            IntentV2.Context intentV2 = (ctx.containsKey("intent_v2") ? IntentV2.Context.fromJson(ctx.get("intent_v2")) : null);
             Pca.Verdict got = v.containsKey("pcactn_json")
-                ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud, allowedSuites)
-                : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud, allowedSuites);
+                ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud, allowedSuites, intentPolicy, intentV2)
+                : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud, allowedSuites, intentPolicy, intentV2);
             Map<String, Object> exp = (Map<String, Object>) v.get("expect");
+            // Intent Layer v2: a vector whose v2 artifacts need a suite this verifier lacks must FAIL closed with unsupported_suite
+            String missingSuite = missingRequiredSuite(v.get("requires_suite"));
+            if (missingSuite != null) {
+                check(!got.allow && got.reason.contains("unsupported_suite"), v.get("name") + ": requires_suite " + missingSuite + " not implemented, so it must fail with unsupported_suite (" + got.reason + ")");
+                ran++;
+                continue;
+            }
+            if (exp.get("reason_contains") instanceof String)
+                check(got.reason.contains((String) exp.get("reason_contains")), v.get("name") + ": reason '" + got.reason + "' does not contain " + exp.get("reason_contains"));
             boolean wantAllow = (Boolean) exp.get("allow");
             check(got.allow == wantAllow, v.get("name") + ": allow=" + got.allow + " want " + wantAllow + " (" + got.reason + ")");
             Map<String, Object> want = (Map<String, Object>) exp.get("checks");
@@ -251,6 +385,11 @@ public class ConformanceTest {
             boolean wantValid = !e.containsKey("valid") || (Boolean) e.get("valid");
             boolean gotValid = Threshold.verifyShare(role, tmsg, signerSet, t, share);
             String nm = e.containsKey("name") ? (String) e.get("name") : role + "-t" + t;
+            // Suite capability: an entry whose `requires` suite this verifier lacks is not compared; it must be refused.
+            if (e.get("requires") instanceof String && !IMPLEMENTED_SUITES.contains((String) e.get("requires"))) {
+                check(!gotValid, "threshold_share " + nm + ": share under unsupported suite " + e.get("requires") + " verified (want fail closed)");
+                continue;
+            }
             check(gotValid == wantValid, "threshold_share " + nm + ": verify=" + gotValid + " want " + wantValid);
             shareChecks++;
             if ("agent-bare-rejected".equals(nm)) bareAgentRejectVerified = !gotValid;
@@ -396,6 +535,33 @@ public class ConformanceTest {
         }
         check(headerRan >= 27, "pca_header primitives present (" + headerRan + ")");
         System.out.println("PCA_HEADER: " + headerRan + " run");
+
+        // ---- Intent Layer v2 primitives (rules 13 step 7, 14, 16, 17, 18); reason strings are never compared ----
+        for (String kind : List.of("intent_schema", "intent_revocation", "intent_world", "intent_provenance", "intent_classifier", "intent_wb_active", "intent_map_commit", "intent_map", "intent_read_purpose")) {
+            if (!(prim.get(kind) instanceof List)) { System.out.println(kind.toUpperCase() + ": absent"); continue; }
+            int n = 0;
+            for (Object x : (List<Object>) prim.get(kind)) {
+                Map<String, Object> e = (Map<String, Object>) x;
+                String why;
+                try {
+                    Map<String, Object> exp = (Map<String, Object>) e.get("expect");
+                    String missingSuite = missingRequiredSuite(e.get("requires_suite"));
+                    Object input = inputOf(e);
+                    String reason = intentPrimitiveReason(kind, input);
+                    if (missingSuite != null) why = reason != null && reason.contains("unsupported_suite") ? null : "requires_suite " + missingSuite + ": must fail with unsupported_suite (" + reason + ")";
+                    else {
+                        why = intentPrimitiveMismatch(kind, input, exp);
+                        if (why == null && exp.get("reason_contains") instanceof String && (reason == null || !reason.contains((String) exp.get("reason_contains"))))
+                            why = "reason '" + reason + "' does not contain " + exp.get("reason_contains");
+                    }
+                }
+                catch (Throwable th) { why = "THREW " + th; }
+                check(why == null, kind + " " + e.get("name") + ": " + why);
+                n++;
+            }
+            check(n >= 1, kind + " primitives present (" + n + ")");
+            System.out.println(kind.toUpperCase() + ": " + n + " run");
+        }
 
         // ---- report ------------------------------------------------------------------------------------------
         System.out.println();

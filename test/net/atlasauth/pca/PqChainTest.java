@@ -79,6 +79,11 @@ public class PqChainTest {
             Map<String, Object> pins = new LinkedHashMap<>(); pins.put(issuer, pk(k));
             assertEquals("", Pca.verifyChain(chain, issuer, true, null, pins, null), alg + " pinned");
             assertEquals("", Pca.verifyChain(chain, issuer, true, null, null, root), alg + " trusted root");
+            // 0.4.2: trusted root AND a pin for the issuer must agree (the stored grant never overrides a disagreeing pin)
+            assertEquals("", Pca.verifyChain(chain, issuer, true, null, pins, root), alg + " trusted root + agreeing pin");
+            Map<String, Object> wrongWithRoot = new LinkedHashMap<>(); wrongWithRoot.put(issuer, pk(pqKey()));
+            assertEquals("hop 0: root suite '" + alg + "': the server-side PQ pin for the root issuer (policy.pqPins) does not match the stored grant's pq_pk (fail closed)",
+                Pca.verifyChain(chain, issuer, true, null, wrongWithRoot, root), alg + " trusted root + wrong pin");
             assertEquals("", Pca.verifyChain(chain, null, false, null, pins, null));
             assertEquals(refusal(alg), Pca.verifyChain(chain, issuer, true, null, null, null));
             Map<String, Object> wrongPin = new LinkedHashMap<>(); wrongPin.put(issuer, pk(pqKey()));

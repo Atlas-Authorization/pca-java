@@ -20,7 +20,8 @@ import java.util.Map;
  * <p>The context is a map with snake_case keys, exactly the {@code context} of the {@code primitives.caveat_eval}
  * vectors: {@code now} (epoch ms), {@code delegation_depth}, {@code blast_radius}, {@code reversibility_class},
  * {@code recent_action_times} (all optional) and {@code action} ({@code {verb, resource, reversibility_class, params}}).
- * An absent optional field leaves the caveat that needs it unsatisfied. Unknown caveat types (and {@code note},
+ * An absent optional field leaves the caveat that needs it unsatisfied. A well-formed {@code intent_session} caveat
+ * (Intent Layer v2) is satisfied (it constrains nothing per action), a malformed one is not. Unknown caveat types (and {@code note},
  * {@code envelope}, {@code resource_prefix}, {@code predicates}, {@code tool_schema}) are unsatisfied: fail closed.
  */
 public final class Caveats {
@@ -150,6 +151,9 @@ public final class Caveats {
                 Double lim = fin(cv.get("limit"));
                 return lim != null && lim >= 0;
             }
+            case "intent_session":
+                // Intent Layer v2 session binding (rule 13): no per-action constraint; satisfied iff well-formed.
+                return IntentSession.caveatError(cv) == null;
             default:
                 return false;
         }

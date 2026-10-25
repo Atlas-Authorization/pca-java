@@ -1,11 +1,17 @@
 package net.atlasauth.pca;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.bouncycastle.pqc.crypto.mldsa.MLDSAParameters;
 import org.bouncycastle.pqc.crypto.mldsa.MLDSAPublicKeyParameters;
 import org.bouncycastle.pqc.crypto.mldsa.MLDSASigner;
+import org.bouncycastle.pqc.crypto.slhdsa.SLHDSAParameters;
+import org.bouncycastle.pqc.crypto.slhdsa.SLHDSAPublicKeyParameters;
+import org.bouncycastle.pqc.crypto.slhdsa.SLHDSASigner;
 
 /**
  * B4 — post-quantum crypto-agility, mirroring {@code packages/pca/src/pq.ts} (and the Go/Swift/.NET SDKs).
@@ -31,6 +37,14 @@ import org.bouncycastle.pqc.crypto.mldsa.MLDSASigner;
  * (CRYSTALS-Dilithium / FIPS-204, 192-bit category-3 parameter set), pure variant with an EMPTY context —
  * byte-compatible with {@code @noble/post-quantum}'s {@code ml_dsa65} and circl's {@code mldsa65}. ML-DSA-65 sizes:
  * public key 1952 bytes, signature 3309 bytes.
+ *
+ * <p>Suite capability ({@code packages/pca/conformance/SUITES.md}): every registered suite BouncyCastle provides is
+ * implemented, pure mode, EMPTY context: ML-DSA-65 / ML-DSA-87 (FIPS 204, {@code MLDSASigner}), SLH-DSA-SHA2-128f /
+ * SLH-DSA-SHA2-256s (FIPS 205, {@code SLHDSASigner}), their {@code hybrid-ed25519-*} forms (the Ed25519 half is checked
+ * first) and the SUF-CMA {@code hybrid-nested-ed25519-ml-dsa-65} (the PQ half signs msg || the Ed25519 signature bytes).
+ * FN-DSA (BouncyCastle ships round-3 Falcon, not the FIPS 206 encoding) is refused with the distinct reason
+ * {@code unsupported_suite: <alg>}; so is LESS unless {@link LessNative} has a runtime and {@code libatlas_less} (its
+ * signature is variable-length, see {@link Prim#sigLenOk}).
  */
 public final class Pq {
     private Pq() {}
@@ -41,34 +55,92 @@ public final class Pq {
     /** Ed25519 signature length, in bytes (unchanged classical suite). */
     public static final int ED25519_SIGNATURE_BYTES = 64;
 
+    /** The reason token of a registered suite this verifier does not implement (full reason {@code unsupported_suite: <alg>}). */
+    public static final String UNSUPPORTED_SUITE = "unsupported_suite";
+
+    /** The closed TS suite registry ({@code SIG_SUITES} in pq.ts), in registry order. */
+    public static final List<String> REGISTERED_SUITES = List.of(
+        "ed25519", "ml-dsa-65", "hybrid-ed25519-ml-dsa-65", "hybrid-nested-ed25519-ml-dsa-65", "slh-dsa-sha2-128f",
+        "hybrid-ed25519-slh-dsa-sha2-128f", "ml-dsa-87", "hybrid-ed25519-ml-dsa-87", "slh-dsa-sha2-256s",
+        "hybrid-ed25519-slh-dsa-sha2-256s", "fn-dsa-512", "fn-dsa-1024", "less-cat1", "hybrid-ed25519-less-cat1");
+
+    /** The post-quantum primitive of a suite, with its (public key, signature) byte lengths. */
+    public enum Prim {
+        ML_DSA_65(ML_DSA_65_PUBLIC_KEY_BYTES, ML_DSA_65_SIGNATURE_BYTES),
+        ML_DSA_87(2592, 4627),
+        SLH_DSA_SHA2_128F(32, 17088),
+        SLH_DSA_SHA2_256S(64, 29792),
+        /** LESS (less-252-45) through {@link LessNative}; {@code sigBytes} is the MAXIMUM signature length. */
+        LESS_CAT1(LessNative.PUBLIC_KEY_BYTES, LessNative.SIGNATURE_MAX_BYTES);
+        public final int pkBytes;
+        public final int sigBytes;
+        Prim(int pkBytes, int sigBytes) { this.pkBytes = pkBytes; this.sigBytes = sigBytes; }
+        /** {@code n} is a signature length of this primitive: its fixed length, or (LESS) any length the parameter set produces. */
+        public boolean sigLenOk(int n) { return this == LESS_CAT1 ? LessNative.sigLenOk(n) : n == sigBytes; }
+    }
+
     /** A signature suite: the decoded {@code sig} byte length and which components / fields it requires. */
     public static final class Suite {
         public final String alg;
         public final int sigBytes;
         public final boolean hasEd25519;
-        public final boolean hasMlDsa;
+        /** The PQ primitive (null for ed25519). */
+        public final Prim pq;
         public final boolean needsPqPk;
         public final boolean needsPqSig;
-        Suite(String alg, int sigBytes, boolean hasEd25519, boolean hasMlDsa, boolean needsPqPk, boolean needsPqSig) {
+        /** SUF-CMA nested hybrid: the PQ half signs msg || the Ed25519 signature bytes. */
+        public final boolean nested;
+        Suite(String alg, int sigBytes, boolean hasEd25519, Prim pq, boolean needsPqPk, boolean needsPqSig, boolean nested) {
             this.alg = alg;
             this.sigBytes = sigBytes;
             this.hasEd25519 = hasEd25519;
-            this.hasMlDsa = hasMlDsa;
+            this.pq = pq;
             this.needsPqPk = needsPqPk;
             this.needsPqSig = needsPqSig;
+            this.nested = nested;
         }
+    }
+
+    private static void pure(String alg, Prim p) { SUITES.put(alg, new Suite(alg, p.sigBytes, false, p, true, false, false)); }
+
+    private static void hybrid(String alg, Prim p, boolean nested) {
+        SUITES.put(alg, new Suite(alg, ED25519_SIGNATURE_BYTES, true, p, true, true, nested));
     }
 
     /** The default suite used when {@code alg} is absent — the pre-B4 default. MUST stay "ed25519" forever. */
     public static final String DEFAULT_SIG_ALG = "ed25519";
 
-    /** The closed algorithm registry. */
+    /** The suites this verifier implements (a subset of {@link #REGISTERED_SUITES}). */
     static final Map<String, Suite> SUITES = new LinkedHashMap<>();
     static {
-        SUITES.put("ed25519", new Suite("ed25519", ED25519_SIGNATURE_BYTES, true, false, false, false));
-        SUITES.put("ml-dsa-65", new Suite("ml-dsa-65", ML_DSA_65_SIGNATURE_BYTES, false, true, true, false));
-        SUITES.put("hybrid-ed25519-ml-dsa-65",
-            new Suite("hybrid-ed25519-ml-dsa-65", ED25519_SIGNATURE_BYTES, true, true, true, true));
+        SUITES.put("ed25519", new Suite("ed25519", ED25519_SIGNATURE_BYTES, true, null, false, false, false));
+        pure("ml-dsa-65", Prim.ML_DSA_65);
+        hybrid("hybrid-ed25519-ml-dsa-65", Prim.ML_DSA_65, false);
+        hybrid("hybrid-nested-ed25519-ml-dsa-65", Prim.ML_DSA_65, true);
+        pure("slh-dsa-sha2-128f", Prim.SLH_DSA_SHA2_128F);
+        hybrid("hybrid-ed25519-slh-dsa-sha2-128f", Prim.SLH_DSA_SHA2_128F, false);
+        pure("ml-dsa-87", Prim.ML_DSA_87);
+        hybrid("hybrid-ed25519-ml-dsa-87", Prim.ML_DSA_87, false);
+        pure("slh-dsa-sha2-256s", Prim.SLH_DSA_SHA2_256S);
+        hybrid("hybrid-ed25519-slh-dsa-sha2-256s", Prim.SLH_DSA_SHA2_256S, false);
+        if (LessNative.available()) {
+            pure("less-cat1", Prim.LESS_CAT1);
+            hybrid("hybrid-ed25519-less-cat1", Prim.LESS_CAT1, false);
+        }
+    }
+
+    /** The capability manifest: the registered suites this verifier implements, in registry order. */
+    public static List<String> supportedSuites() {
+        List<String> out = new ArrayList<>();
+        for (String a : REGISTERED_SUITES) if (SUITES.containsKey(a)) out.add(a);
+        return Collections.unmodifiableList(out);
+    }
+
+    /** The refusal of an {@code alg} this verifier does not resolve: {@code unsupported_suite: <alg>} for a registered
+     *  suite, else {@code unknown signature alg '<alg>'}. */
+    static String refusal(Object alg) {
+        return alg instanceof String && REGISTERED_SUITES.contains(alg)
+            ? UNSUPPORTED_SUITE + ": " + alg : "unknown signature alg '" + String.valueOf(alg) + "'";
     }
 
     /**
@@ -83,27 +155,60 @@ public final class Pq {
 
     // ---- ML-DSA-65 verification -------------------------------------------------------------
 
-    /** ML-DSA-65 verify over raw bytes (pure variant, empty context). Never throws; wrong length / bad input => false. */
-    public static boolean mlDsa65Verify(byte[] pk, byte[] msg, byte[] sig) {
-        if (pk == null || sig == null || pk.length != ML_DSA_65_PUBLIC_KEY_BYTES || sig.length != ML_DSA_65_SIGNATURE_BYTES)
+    /** PQ verify over raw bytes (pure variant, empty context). Never throws; wrong length / bad input => false. */
+    public static boolean pqVerify(Prim p, byte[] pk, byte[] msg, byte[] sig) {
+        if (p == null || pk == null || sig == null || msg == null || pk.length != p.pkBytes || !p.sigLenOk(sig.length))
             return false;
+        if (p == Prim.LESS_CAT1) return LessNative.verify(pk, msg, sig);
         try {
-            MLDSAPublicKeyParameters pub = new MLDSAPublicKeyParameters(MLDSAParameters.ml_dsa_65, pk);
-            MLDSASigner v = new MLDSASigner(); // pure ML-DSA, empty context (matches @noble / circl)
-            v.init(false, pub);
-            v.update(msg, 0, msg.length);
-            return v.verifySignature(sig);
+            switch (p) {
+                case ML_DSA_65:
+                case ML_DSA_87: {
+                    MLDSAParameters ps = p == Prim.ML_DSA_65 ? MLDSAParameters.ml_dsa_65 : MLDSAParameters.ml_dsa_87;
+                    MLDSASigner v = new MLDSASigner(); // pure ML-DSA, empty context (matches @noble / circl)
+                    v.init(false, new MLDSAPublicKeyParameters(ps, pk));
+                    v.update(msg, 0, msg.length);
+                    return v.verifySignature(sig);
+                }
+                default: {
+                    SLHDSAParameters ps = p == Prim.SLH_DSA_SHA2_128F ? SLHDSAParameters.sha2_128f : SLHDSAParameters.sha2_256s;
+                    SLHDSASigner v = new SLHDSASigner(); // pure SLH-DSA, empty context
+                    v.init(false, new SLHDSAPublicKeyParameters(ps, pk));
+                    return v.verifySignature(msg, sig);
+                }
+            }
         } catch (RuntimeException e) {
             return false;
         }
     }
 
+    /** ML-DSA-65 verify over raw bytes (pure variant, empty context). Never throws; wrong length / bad input => false. */
+    public static boolean mlDsa65Verify(byte[] pk, byte[] msg, byte[] sig) {
+        return pqVerify(Prim.ML_DSA_65, pk, msg, sig);
+    }
+
     /** {@link #mlDsa65Verify} over base64url-encoded key and signature; false on any decoding error. */
     static boolean mlDsa65VerifyB64u(Object pkB64u, byte[] msg, Object sigB64u) {
-        byte[] pk = Pca.decodeB64uStrict(pkB64u, ML_DSA_65_PUBLIC_KEY_BYTES);
-        byte[] sg = Pca.decodeB64uStrict(sigB64u, ML_DSA_65_SIGNATURE_BYTES);
-        if (pk == null || sg == null) return false;
-        return mlDsa65Verify(pk, msg, sg);
+        return pqVerifyB64u(Prim.ML_DSA_65, pkB64u, msg, sigB64u);
+    }
+
+    /** {@link #pqVerify} over base64url-encoded key and signature; false on any decoding error. */
+    static boolean pqVerifyB64u(Prim p, Object pkB64u, byte[] msg, Object sigB64u) {
+        byte[] pk = Pca.decodeB64uStrict(pkB64u, p.pkBytes);
+        byte[] sg = Pca.decodeB64uStrict(sigB64u, -1);
+        if (pk == null || sg == null || !p.sigLenOk(sg.length)) return false;
+        return pqVerify(p, pk, msg, sg);
+    }
+
+    /** Canonical base64url whose decoded length is a signature length of {@code p}. */
+    static boolean pqSigOk(Prim p, Object v) {
+        byte[] b = Pca.decodeB64uStrict(v, -1);
+        return b != null && p.sigLenOk(b.length);
+    }
+
+    /** The primary {@code sig}: the PQ signature for a pure suite (its length rule), else the 64-byte Ed25519 one. */
+    static boolean sigFieldOk(Suite suite, Object v) {
+        return suite.pq != null && !suite.needsPqSig ? pqSigOk(suite.pq, v) : Pca.decodeB64uStrict(v, suite.sigBytes) != null;
     }
 
     // ---- wire-shape validation of the signature fields --------------------------------------
@@ -118,20 +223,20 @@ public final class Pq {
         Object algV = p.get("alg");
         if (algPresent && !(algV instanceof String)) return "'alg' must be a string";
         Suite suite = resolveSigAlg(algV, algPresent);
-        if (suite == null) return "unknown signature alg '" + String.valueOf(algV) + "'";
+        if (suite == null) return refusal(algV);
 
-        if (Pca.decodeB64uStrict(p.get("sig"), suite.sigBytes) == null)
+        if (!sigFieldOk(suite, p.get("sig")))
             return "'sig' is not canonical base64url (" + suite.sigBytes + " bytes) for alg '" + suite.alg + "'";
 
         if (suite.needsPqPk) {
-            if (Pca.decodeB64uStrict(p.get("pq_pk"), ML_DSA_65_PUBLIC_KEY_BYTES) == null)
-                return "'pq_pk' is not canonical base64url (" + ML_DSA_65_PUBLIC_KEY_BYTES + " bytes)";
+            if (Pca.decodeB64uStrict(p.get("pq_pk"), suite.pq.pkBytes) == null)
+                return "'pq_pk' is not canonical base64url (" + suite.pq.pkBytes + " bytes)";
         } else if (p.containsKey("pq_pk")) {
             return "'pq_pk' must be absent for alg '" + suite.alg + "'";
         }
         if (suite.needsPqSig) {
-            if (Pca.decodeB64uStrict(p.get("pq_sig"), ML_DSA_65_SIGNATURE_BYTES) == null)
-                return "'pq_sig' is not canonical base64url (" + ML_DSA_65_SIGNATURE_BYTES + " bytes)";
+            if (!pqSigOk(suite.pq, p.get("pq_sig")))
+                return "'pq_sig' is not canonical base64url (" + suite.pq.sigBytes + " bytes)";
         } else if (p.containsKey("pq_sig")) {
             return "'pq_sig' must be absent for alg '" + suite.alg + "'";
         }
@@ -151,12 +256,12 @@ public final class Pq {
         Object algV = s.get("alg");
         if (algPresent && !(algV instanceof String)) return "'alg' must be a string";
         Suite suite = resolveSigAlg(algV, algPresent);
-        if (suite == null) return "unknown signature alg '" + String.valueOf(algV) + "'";
-        if (Pca.decodeB64uStrict(s.get("sig"), suite.sigBytes) == null)
+        if (suite == null) return refusal(algV);
+        if (!sigFieldOk(suite, s.get("sig")))
             return "'sig' is not canonical base64url (" + suite.sigBytes + " bytes) for alg '" + suite.alg + "'";
         if (suite.needsPqSig) {
-            if (Pca.decodeB64uStrict(s.get("pq_sig"), ML_DSA_65_SIGNATURE_BYTES) == null)
-                return "'pq_sig' is not canonical base64url (" + ML_DSA_65_SIGNATURE_BYTES + " bytes) for alg '" + suite.alg + "'";
+            if (!pqSigOk(suite.pq, s.get("pq_sig")))
+                return "'pq_sig' is not canonical base64url (" + suite.pq.sigBytes + " bytes) for alg '" + suite.alg + "'";
         } else if (s.containsKey("pq_sig")) {
             return "'pq_sig' must be absent for alg '" + suite.alg + "'";
         }
@@ -233,16 +338,19 @@ public final class Pq {
         if (suite == null) return false;
         if (!(sig instanceof String)) return false;
         String sigStr = (String) sig;
-        switch (suite.alg) {
-            case "ed25519":
-                return Pca.verifyB64u(holder, msg, sigStr);
-            case "ml-dsa-65":
-                return pq != null && mlDsa65VerifyB64u(pq.key, msg, sigStr);
-            case "hybrid-ed25519-ml-dsa-65":
-                if (!(pqSig instanceof String)) return false;
-                return Pca.verifyB64u(holder, msg, sigStr) && pq != null && mlDsa65VerifyB64u(pq.key, msg, (String) pqSig);
-            default:
-                return false;
+        if (suite.pq == null) return Pca.verifyB64u(holder, msg, sigStr);
+        if (pq == null) return false;
+        if (!suite.needsPqSig) return pqVerifyB64u(suite.pq, pq.key, msg, sigStr); // pure PQ: `sig` is the PQ signature
+        // hybrid: the cheap Ed25519 half first (R6-API-04), then the PQ `pq_sig` (nested: over msg || Ed25519 sig bytes)
+        if (!(pqSig instanceof String) || !Pca.verifyB64u(holder, msg, sigStr)) return false;
+        byte[] pqMsg = msg;
+        if (suite.nested) {
+            byte[] edSig = Pca.decodeB64uStrict(sigStr, ED25519_SIGNATURE_BYTES);
+            if (edSig == null) return false;
+            pqMsg = new byte[msg.length + edSig.length];
+            System.arraycopy(msg, 0, pqMsg, 0, msg.length);
+            System.arraycopy(edSig, 0, pqMsg, msg.length, edSig.length);
         }
+        return pqVerifyB64u(suite.pq, pq.key, pqMsg, pqSig);
     }
 }

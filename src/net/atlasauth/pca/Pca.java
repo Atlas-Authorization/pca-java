@@ -15,8 +15,8 @@ import org.bouncycastle.math.ec.rfc8032.Ed25519;
 
 /**
  * Reference verifier for the CORE PCActn checks, wire format v2. Byte-matches @atlasauth/pca.
- * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter
- * (wire failure is terminal). Requires BouncyCastle (bcprov-jdk18on, org.bouncycastle.math.ec.rfc8032.Ed25519).
+ * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter, then
+ * intent when evaluated (Intent Layer M2; see {@link IntentPolicy}) (wire failure is terminal). Requires BouncyCastle (bcprov-jdk18on, org.bouncycastle.math.ec.rfc8032.Ed25519).
  */
 public final class Pca {
     private Pca() {}
@@ -61,7 +61,195 @@ public final class Pca {
     static final byte[] CAP_DOMAIN = "atlas-pca/cap/v1\0".getBytes(StandardCharsets.UTF_8);
     static final String DEFAULT_REV = "reversible";
 
-    /** `checks` holds, in normative order, wire alone (wire failure) or all eight checks. */
+    // ---- Intent Layer M2: envelope.intent ----
+    public static final String INTENT_GOAL_PREFIX = "pca-intent:v1:";
+    /** Domain of the root grant's salted goal commitment (envelope goal_commit). */
+    public static final String INTENT_GOAL_COMMIT_DOMAIN = "atlas-pca/goal/v1\0";
+    public static final long PPM_ONE = 1_000_000L;
+    public static final int MAX_INTENT_GOAL_SALT_LEN = 128;
+    /** Closed member set of {@code envelope.intent} (all required). */
+    static final List<String> ENVELOPE_INTENT_FIELDS = Arrays.asList("ref", "map_digest", "goal_salt", "fidelity_ppm", "residual_risk_ppm");
+    private static final double MAX_SAFE_DOUBLE = 9007199254740991.0;
+
+    /**
+     * Verifier-side intent policy (Intent Layer M2). ACTIVE iff {@code require} is true or either threshold is set
+     * (a threshold implies require); an active policy fails closed on a PCActn without {@code intent}. Thresholds are
+     * nullable doubles so that a set-but-invalid value (negative, fractional, NaN) is representable: it is a
+     * misconfiguration and fails the {@code intent} check closed.
+     */
+    public static final class IntentPolicy {
+        /** Require every PCActn to carry a bound {@code intent}. */
+        public final boolean require;
+        /** Deny when the claimed {@code fidelity_ppm} is below this (null = unset). Setting it implies require. */
+        public final Double minFidelityPpm;
+        /** Deny when the claimed {@code residual_risk_ppm} is above this (null = unset). Setting it implies require. */
+        public final Double maxResidualRiskPpm;
+
+        public IntentPolicy(boolean require, Double minFidelityPpm, Double maxResidualRiskPpm) {
+            this.require = require;
+            this.minFidelityPpm = minFidelityPpm;
+            this.maxResidualRiskPpm = maxResidualRiskPpm;
+        }
+
+        /** {@code {require: true}}. */
+        public static IntentPolicy required() { return new IntentPolicy(true, null, null); }
+
+        /** True iff the policy is active (the intent check runs even for a PCActn without the field). */
+        public boolean isActive() { return require || minFidelityPpm != null || maxResidualRiskPpm != null; }
+
+        /**
+         * From a parsed JSON object {@code {require?, min_fidelity_ppm?, max_residual_risk_ppm?}} (Json.parse /
+         * parseLenient tree, or plain Java values). A non-object is null (no policy). A present threshold that is not a
+         * number (including JSON null) maps to NaN: set, and invalid, so it fails closed.
+         */
+        public static IntentPolicy fromJson(Object o) {
+            if (!(o instanceof Map)) return null;
+            Map<?, ?> m = (Map<?, ?>) o;
+            return new IntentPolicy(Boolean.TRUE.equals(m.get("require")),
+                threshold(m, "min_fidelity_ppm"), threshold(m, "max_residual_risk_ppm"));
+        }
+
+        /**
+         * From raw JSON text (a policy configuration file, or a conformance vector's {@code intent_policy_json}), parsed
+         * with the lenient RFC 8259 parser so any number spelling is kept ({@code 950000.0} and {@code 1e6} are the valid
+         * thresholds 950000 and 1000000: validity is judged on the NUMERIC value). Non-object JSON is null; malformed JSON
+         * throws (a configuration error).
+         */
+        public static IntentPolicy fromJsonText(String text) { return fromJson(Json.parseLenient(text)); }
+
+        private static Double threshold(Map<?, ?> m, String k) {
+            if (!m.containsKey(k)) return null;
+            Object v = m.get(k);
+            if (v instanceof Json.Num) {
+                try { return Double.parseDouble(((Json.Num) v).raw); } catch (NumberFormatException e) { return Double.NaN; }
+            }
+            if (v instanceof Number) return ((Number) v).doubleValue();
+            return Double.NaN;
+        }
+    }
+
+    /** A set policy threshold must be a safe integer &gt;= 0 (finite, integral, not -0, &lt;= 2^53-1). */
+    static boolean okThreshold(Double x) {
+        if (x == null) return true;
+        double d = x;
+        if (Double.isNaN(d) || Double.isInfinite(d) || d != Math.rint(d)) return false;
+        if (d == 0.0 && Double.doubleToRawLongBits(d) != 0L) return false; // -0
+        return d >= 0 && d <= MAX_SAFE_DOUBLE;
+    }
+
+    /** The goal string that binds a grant to an intent statement and Intent Map. */
+    public static String intentGoal(String ref, String mapDigest) {
+        return INTENT_GOAL_PREFIX + ref + (mapDigest != null && !mapDigest.isEmpty() ? ":" + mapDigest : "");
+    }
+
+    /** The goal commitment an {@code envelope.intent} claims the root grant carries. */
+    public static String intentGoalCommit(String ref, String mapDigest, String goalSalt) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("d", INTENT_GOAL_COMMIT_DOMAIN);
+        m.put("goal", intentGoal(ref, mapDigest));
+        m.put("salt", goalSalt);
+        return hashCanonical(m);
+    }
+
+    /**
+     * Intent Layer v2 (rule 13 amends rule 12 step 2): the goal commitment when the PCActn carries a wire-valid
+     * {@code intent_session}: the goal is {@code "pca-intent:v2:" + session + ":" + map_digest}.
+     */
+    public static String intentGoalCommitV2(String session, String mapDigest, String goalSalt) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("d", INTENT_GOAL_COMMIT_DOMAIN);
+        m.put("goal", IntentSession.intentGoalV2(session, mapDigest));
+        m.put("salt", goalSalt);
+        return hashCanonical(m);
+    }
+
+    /**
+     * Intent Layer v2 committed map (rule 19 amends rule 12 step 2): the goal commitment when the PCActn's
+     * {@code intent_session.map_form} is {@code "commit"}: the goal is {@code "pca-intent:v2c:" + session + ":" + map_commit}.
+     */
+    public static String intentGoalCommitV2c(String session, String mapCommit, String goalSalt) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("d", INTENT_GOAL_COMMIT_DOMAIN);
+        m.put("goal", IntentSession.intentGoalV2c(session, mapCommit));
+        m.put("salt", goalSalt);
+        return hashCanonical(m);
+    }
+
+    /** Wire validation of the {@code intent} slot (called when the slot is present, even as null). Null = well-formed. */
+    @SuppressWarnings("unchecked")
+    static String validateIntentWire(Object o) {
+        if (!(o instanceof Map)) return "'intent' must be an object";
+        Map<String, Object> v = (Map<String, Object>) o;
+        for (String k : v.keySet()) if (!ENVELOPE_INTENT_FIELDS.contains(k)) return "unknown field 'intent." + k + "'";
+        for (String k : ENVELOPE_INTENT_FIELDS) if (!v.containsKey(k)) return "missing field 'intent." + k + "'";
+        if (decodeB64uStrict(v.get("ref"), 32) == null) return "'intent.ref' is not canonical base64url (32 bytes)";
+        if (decodeB64uStrict(v.get("map_digest"), 32) == null) return "'intent.map_digest' is not canonical base64url (32 bytes)";
+        Object salt = v.get("goal_salt");
+        if (!(salt instanceof String) || ((String) salt).isEmpty() || utf8Len((String) salt) > MAX_INTENT_GOAL_SALT_LEN)
+            return "'intent.goal_salt' must be a non-empty string (<= 128 UTF-8 bytes)";
+        Object f = v.get("fidelity_ppm");
+        if (!Json.isSafeInt(f) || Json.asLong(f) < 0 || Json.asLong(f) > PPM_ONE) return "'intent.fidelity_ppm' must be a safe integer in [0, 1000000]";
+        Object r = v.get("residual_risk_ppm");
+        if (!Json.isSafeInt(r) || Json.asLong(r) < 0) return "'intent.residual_risk_ppm' must be a non-negative safe integer";
+        return null;
+    }
+
+    /** The root grant's goal commitment: the FIRST {@code envelope} caveat's string {@code goal_commit}, else null. */
+    static String rootGoalCommit(Map<String, Object> grant) {
+        if (grant == null || !(grant.get("caveats") instanceof List)) return null;
+        for (Object c : (List<?>) grant.get("caveats")) {
+            if (c instanceof Map && "envelope".equals(((Map<?, ?>) c).get("type"))) {
+                Object gc = ((Map<?, ?>) c).get("goal_commit");
+                return gc instanceof String ? (String) gc : null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The {@code intent} check (Intent Layer M2). {@code intent} is the PCActn's slot after wire validation and
+     * {@code present} whether the PCActn carries it; {@code grant} is the verifier's own root grant. Returns null when the
+     * check is not evaluated (no intent, no active policy), "" on pass, else the failure reason. Never throws.
+     */
+    static String decideIntent(Object intent, boolean present, Map<String, Object> grant, IntentPolicy policy) {
+        return decideIntent(intent, present, grant, policy, null, null);
+    }
+
+    /**
+     * As above; {@code session} is the PCActn's wire-valid {@code intent_session.session} (null when it carries none), which
+     * selects the v2 goal {@code "pca-intent:v2:" + session + ":" + map_digest} (rule 13 amends rule 12 step 2), or with
+     * {@code mapForm} {@code "commit"} the v2c goal {@code "pca-intent:v2c:" + session + ":" + map_digest} (rule 19).
+     */
+    @SuppressWarnings("unchecked")
+    static String decideIntent(Object intent, boolean present, Map<String, Object> grant, IntentPolicy policy, String session, Object mapForm) {
+        boolean active = policy != null && policy.isActive();
+        if (!present && !active) return null;
+        try {
+            if (active && (!okThreshold(policy.minFidelityPpm) || !okThreshold(policy.maxResidualRiskPpm)))
+                return "intent policy misconfigured: thresholds must be non-negative safe integers (fail closed)";
+            if (!present) return "this verifier requires an intent binding but the PCActn carries none";
+            String commit = rootGoalCommit(grant);
+            if (commit == null) return "the root grant carries no envelope goal commitment to bind the intent to";
+            Map<String, Object> i = (Map<String, Object>) intent;
+            String opened = session != null
+                ? (IntentMap.MAP_FORM_COMMIT.equals(mapForm)
+                    ? intentGoalCommitV2c(session, (String) i.get("map_digest"), (String) i.get("goal_salt"))
+                    : intentGoalCommitV2(session, (String) i.get("map_digest"), (String) i.get("goal_salt")))
+                : intentGoalCommit((String) i.get("ref"), (String) i.get("map_digest"), (String) i.get("goal_salt"));
+            if (!opened.equals(commit))
+                return "intent ref / map_digest / goal_salt do not open the root grant's goal commitment";
+            long fid = Json.asLong(i.get("fidelity_ppm")), risk = Json.asLong(i.get("residual_risk_ppm"));
+            if (policy != null && policy.minFidelityPpm != null && !((double) fid >= policy.minFidelityPpm))
+                return "intent fidelity " + fid + " ppm is below the policy minimum " + policy.minFidelityPpm.longValue();
+            if (policy != null && policy.maxResidualRiskPpm != null && !((double) risk <= policy.maxResidualRiskPpm))
+                return "intent residual risk " + risk + " ppm exceeds the policy maximum " + policy.maxResidualRiskPpm.longValue();
+            return "";
+        } catch (RuntimeException e) {
+            return "intent binding error (fail closed): " + e.getClass().getSimpleName();
+        }
+    }
+
+    /** `checks` holds, in normative order, wire alone (wire failure) or all eight checks (plus intent when evaluated). */
     public static final class Verdict {
         public boolean allow;
         public final Map<String, Boolean> checks = new LinkedHashMap<>();
@@ -357,7 +545,7 @@ public final class Pca {
     static String checkSig(Map<String, Object> c, String signer, String label, Pq.PinnedPq pq) {
         // Unknown suite => fail-closed (before any hashing), mirroring capability.ts checkSig.
         Map<String, Object> body = signableHopBody(c);
-        if (body == null) return label + ": unknown signature alg '" + String.valueOf(c.get("alg")) + "'";
+        if (body == null) return label + ": " + Pq.refusal(c.get("alg"));
         String digest;
         try { digest = hashCanonical(body); } catch (RuntimeException e) { return label + ": malformed body"; }
         String bd = asStr(c.get("body_digest"));
@@ -374,6 +562,7 @@ public final class Pca {
         return "";
     }
 
+    static final String ROOT_PQ_PIN_MISMATCH_REASON_FMT = "hop 0: root suite '%s': the server-side PQ pin for the root issuer (policy.pqPins) does not match the stored grant's pq_pk (fail closed)";
     static final String ROOT_PQ_PIN_REASON_FMT = "hop 0: root suite '%s' needs a PQ key pinned for the root issuer (policy.pqPins) or the verifier's stored grant (policy.trustedRoot); the root's own pq_pk proves nothing about who issued it (R3-01)";
 
     /** Root PQ authority (mirrors rootPq in capability.ts): a verifier-side pin or the verifier's own stored copy of the root. */
@@ -386,6 +575,9 @@ public final class Pca {
             try { if (capHash(trustedRoot).equals(capHash(root))) trusted = (String) pk; } catch (RuntimeException e) { trusted = null; }
         }
         Object issuer = root.get("issuer");
+        // 0.4.2 fail closed: with the stored grant AND a pin for the issuer, both must agree (the grant never overrides a pin).
+        if (trusted != null && pqPins != null && issuer instanceof String && pqPins.containsKey(issuer) && !trusted.equals(pqPins.get(issuer)))
+            return new Object[] {null, String.format(ROOT_PQ_PIN_MISMATCH_REASON_FMT, suite.alg)};
         Pq.PinnedPq key = Pq.resolvePqKey(issuer instanceof String ? (String) issuer : null, pk, null, pqPins, trusted);
         if (key == null) return new Object[] {null, String.format(ROOT_PQ_PIN_REASON_FMT, suite.alg)};
         return new Object[] {key, null};
@@ -476,6 +668,10 @@ public final class Pca {
     private static final List<String> OPTIONAL = java.util.Arrays.asList(
         "nonce", "caution", "rationale_commitment", "progress_step", "prohibition_evidence", "tool_binding",
         "threshold", "zk_compliance", "bond_ref",
+        // Intent Layer M2 (additive, SIGNED): the `envelope.intent` binding (see validateIntentWire / decideIntent).
+        "intent",
+        // Intent Layer v2 (additive, SIGNED): the session member (rule 13; see IntentSession.validateWire / IntentV2).
+        "intent_session",
         // B4 crypto-agility (additive): absent `alg` == "ed25519" and validates exactly as today.
         "alg", "pq_pk", "pq_sig");
 
@@ -611,6 +807,14 @@ public final class Pca {
             if (p.containsKey("tool_binding") && decodeB64uStrict(p.get("tool_binding"), 32) == null)
                 return "'tool_binding' is not canonical base64url (32 bytes)";
             if (p.containsKey("progress_step") && !isObj(p.get("progress_step"))) return "'progress_step' must be an object";
+            if (p.containsKey("intent")) {
+                String intentErr = validateIntentWire(p.get("intent"));
+                if (intentErr != null) return intentErr;
+            }
+            if (p.containsKey("intent_session")) {
+                String sessionErr = IntentSession.validateWire(p.get("intent_session"));
+                if (sessionErr != null) return sessionErr;
+            }
             if (p.containsKey("prohibition_evidence") && !isObj(p.get("prohibition_evidence")) && !(p.get("prohibition_evidence") instanceof List))
                 return "'prohibition_evidence' must be an object or array";
             if (p.containsKey("threshold")) {
@@ -651,6 +855,18 @@ public final class Pca {
 
     /** As above with an optional allowed-suites policy (null = none; an empty list refuses every suite). */
     public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites) {
+        return verifyPcactnJson(text, grant, now, audience, allowedSuites, null);
+    }
+
+    /** As above with an optional Intent Layer M2 policy (null = none: the intent check runs only for a PCActn carrying intent). */
+    public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                           IntentPolicy intentPolicy) {
+        return verifyPcactnJson(text, grant, now, audience, allowedSuites, intentPolicy, null);
+    }
+
+    /** As above with the Intent Layer v2 verifier state (null = none: the v2 checks run only for a PCActn carrying intent_session). */
+    public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                           IntentPolicy intentPolicy, IntentV2.Context intentV2) {
         if (text != null && artifactTooLarge(text)) { // FIRST: before any parsing (null: refused by the strict parse below)
             Verdict big = new Verdict();
             big.fail("wire", ARTIFACT_SIZE_REASON);
@@ -664,7 +880,7 @@ public final class Pca {
             v.fail("wire", "strict JSON: " + e.getMessage());
             return v;
         }
-        return verifyPcactn(parsed, grant, now, audience, allowedSuites);
+        return verifyPcactn(parsed, grant, now, audience, allowedSuites, intentPolicy, intentV2);
     }
 
     /**
@@ -677,9 +893,29 @@ public final class Pca {
 
     /** As above with an optional allowed-suites policy (null = none; an empty list refuses every suite). */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites) {
+        return verifyPcactn(pcactn, grant, now, audience, allowedSuites, null);
+    }
+
+    /**
+     * As above with an optional Intent Layer M2 policy (null = none). The {@code intent} check is reported (after
+     * counter) iff the PCActn carries {@code intent} or the policy is active; otherwise the verdict is the pre-M2 one.
+     */
+    public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                       IntentPolicy intentPolicy) {
+        return verifyPcactn(pcactn, grant, now, audience, allowedSuites, intentPolicy, null);
+    }
+
+    /**
+     * As above with the Intent Layer v2 verifier state ({@link IntentV2.Context}; null = none). After {@code intent} the v2
+     * checks {@code schema}, {@code intent_session}, {@code layers}, {@code accumulators}, {@code facts},
+     * {@code provenance}, {@code classes} are reported exactly when IntentV2 reports them; a PCActn without
+     * {@code intent_session} under a context without an active v2 policy verifies exactly as before.
+     */
+    public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                       IntentPolicy intentPolicy, IntentV2.Context intentV2) {
         // TOTAL (R6-05): any residual fault on hostile input is a terminal wire refusal, never an exception.
         try {
-            return verifyPcactnUnchecked(pcactn, grant, now, audience, allowedSuites);
+            return verifyPcactnUnchecked(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2);
         } catch (RuntimeException ex) {
             Verdict w = new Verdict();
             w.fail("wire", "malformed input (" + ex.getClass().getSimpleName() + ")");
@@ -687,7 +923,8 @@ public final class Pca {
         }
     }
 
-    private static Verdict verifyPcactnUnchecked(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites) {
+    private static Verdict verifyPcactnUnchecked(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                                 IntentPolicy intentPolicy, IntentV2.Context intentV2) {
         Verdict v = new Verdict();
         String wire = validateWireV2(pcactn);
         if (wire != null) {
@@ -696,6 +933,8 @@ public final class Pca {
         }
         Map<String, Object> p = asMap(pcactn);
         v.checks.put("wire", true);
+        boolean intentPresent = p.containsKey("intent");
+        boolean intentReported = intentPresent || (intentPolicy != null && intentPolicy.isActive());
         try {
             // version
             if (Json.asLong(p.get("ver")) == WIRE_VERSION) v.checks.put("version", true);
@@ -764,6 +1003,15 @@ public final class Pca {
             // counter
             if (Json.isSafeInt(p.get("counter")) && Json.asLong(p.get("counter")) >= 0) v.checks.put("counter", true);
             else v.fail("counter", "missing or not a non-negative safe integer");
+
+            // Intent Layer M2: `intent` (reported iff the PCActn carries intent or the policy is active)
+            Object session = p.containsKey("intent_session") ? asMap(p.get("intent_session")).get("session") : null;
+            Object mapForm = p.containsKey("intent_session") ? asMap(p.get("intent_session")).get("map_form") : null;
+            String intentWhy = decideIntent(p.get("intent"), intentPresent, grant, intentPolicy, session instanceof String ? (String) session : null, mapForm);
+            if (intentWhy != null) {
+                if (intentWhy.isEmpty()) v.checks.put("intent", true);
+                else v.fail("intent", intentWhy);
+            }
         } catch (RuntimeException e) {
             if (v.reason.isEmpty()) v.reason = "malformed PCActn: " + e;
         }
@@ -771,6 +1019,12 @@ public final class Pca {
         Map<String, Boolean> ordered = new LinkedHashMap<>();
         for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter"})
             ordered.put(k, Boolean.TRUE.equals(v.checks.get(k)));
+        if (intentReported) ordered.put("intent", Boolean.TRUE.equals(v.checks.get("intent")));
+        // Intent Layer v2 (rules 13-18): reported in pipeline order exactly when IntentV2 reports them (total: never throws)
+        for (IntentV2.Check c : IntentV2.decide(p, grant, intentV2, now).checks) {
+            ordered.put(c.name, c.ok);
+            if (!c.ok && v.reason.isEmpty()) v.reason = c.name + ": " + c.reason;
+        }
         v.checks.clear();
         v.checks.putAll(ordered);
         v.allow = !v.checks.containsValue(Boolean.FALSE);
