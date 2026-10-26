@@ -1,5 +1,6 @@
 package net.atlasauth.pca.servlet;
 
+import net.atlasauth.pca.Authorize;
 import net.atlasauth.pca.Pca;
 
 /**
@@ -30,15 +31,32 @@ public final class PcaResult {
     private final Pca.Verdict verdict;
     private final Object pcactn;
     private final String detail;
+    private final Authorize.AuthorizeResult authorization;
 
     PcaResult(Outcome outcome, Pca.Verdict verdict, Object pcactn, String detail) {
+        this(outcome, verdict, pcactn, detail, null);
+    }
+
+    private PcaResult(Outcome outcome, Pca.Verdict verdict, Object pcactn, String detail, Authorize.AuthorizeResult authorization) {
         this.outcome = outcome;
         this.verdict = verdict;
         this.pcactn = pcactn;
         this.detail = detail == null ? "" : detail;
+        this.authorization = authorization;
     }
 
     static PcaResult of(Outcome outcome, String detail) { return new PcaResult(outcome, null, null, detail); }
+
+    /** The outcome of the 0.5 authorize pipeline ({@link Outcome#ALLOW} or {@link Outcome#DENIED}, status from the decision). */
+    static PcaResult ofAuthorization(Authorize.AuthorizeResult r, Object pcactn) {
+        return new PcaResult(r.allow ? Outcome.ALLOW : Outcome.DENIED, r.verdict, pcactn, r.reason, r);
+    }
+
+    /**
+     * The {@link Authorize#authorize} decision when the filter / interceptor runs with the authorize option (its
+     * {@code operation} is what an allow is bound to), else {@code null}.
+     */
+    public Authorize.AuthorizeResult authorization() { return authorization; }
 
     public Outcome outcome() { return outcome; }
 
@@ -53,11 +71,18 @@ public final class PcaResult {
 
     public boolean allowed() { return outcome == Outcome.ALLOW; }
 
-    /** HTTP status for a non-allow outcome: {@code 403} for a denying verdict, {@code 401} otherwise. */
-    public int status() { return outcome == Outcome.DENIED ? 403 : 401; }
+    /**
+     * HTTP status for a non-allow outcome: {@code 403} for a denying verdict, {@code 401} otherwise; with the authorize
+     * option a denial carries the decision's own status ({@code 401} unauthenticated proof, {@code 403} otherwise).
+     */
+    public int status() {
+        if (authorization != null && outcome == Outcome.DENIED) return authorization.status;
+        return outcome == Outcome.DENIED ? 403 : 401;
+    }
 
     /** The OAuth-style {@code error} token, or {@code null} for a bare "no credentials" challenge. */
     public String error() {
+        if (authorization != null && outcome == Outcome.DENIED && authorization.status == 401) return "invalid_pcactn";
         switch (outcome) {
             case UNDECODABLE: return "invalid_request";
             case UNKNOWN_GRANT: return "invalid_grant";
@@ -88,6 +113,7 @@ public final class PcaResult {
     }
 
     private String description() {
+        if (authorization != null) return detail;
         if (outcome == Outcome.DENIED && verdict != null && verdict.reason != null && !verdict.reason.isEmpty())
             return verdict.reason;
         return detail;

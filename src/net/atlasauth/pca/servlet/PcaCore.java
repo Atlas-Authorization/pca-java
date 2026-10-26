@@ -6,6 +6,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+import net.atlasauth.pca.Authorize;
 import net.atlasauth.pca.Json;
 import net.atlasauth.pca.Pca;
 
@@ -35,6 +36,40 @@ public final class PcaCore {
      * @param resolver  maps the PCActn's {@code grant_ref} to its root capability
      */
     public static PcaResult authorize(String pcaHeader, byte[] body, String audience, long now, GrantResolver resolver) {
+        Object d = decode(pcaHeader, body);
+        if (d instanceof PcaResult) return (PcaResult) d;
+        return verify(((Decoded) d).pcactn, audience, now, resolver);
+    }
+
+    /**
+     * 0.5: the full {@link Authorize#authorize} pipeline for one request. The PCActn is read exactly as by
+     * {@link #authorize(String, byte[], String, long, GrantResolver)} (an absent / undecodable one is the same 401); it is
+     * then authorized for {@code operation} (what the handler will execute, from the server's own routing and parsed
+     * body; null denies) with the {@code options} replay store, revocation check, plan mode, context and extra required
+     * checks. Never throws.
+     */
+    public static PcaResult authorize(String pcaHeader, byte[] body, String audience, long now, GrantResolver resolver,
+                                      Authorize.Options options, Authorize.Operation operation) {
+        Object d = decode(pcaHeader, body);
+        if (d instanceof PcaResult) return (PcaResult) d;
+        Authorize.AuthorizeResult r;
+        if (options == null) {
+            r = Authorize.authorize(((Decoded) d).pcactn, new Authorize.Input().operation(operation).audience(audience)
+                .resolveGrant(resolver == null ? null : resolver::resolve).now(now));
+        } else {
+            r = options.run(((Decoded) d).pcactn, operation, audience, resolver == null ? null : resolver::resolve, now);
+        }
+        return PcaResult.ofAuthorization(r, ((Decoded) d).pcactn);
+    }
+
+    /** A decoded PCActn (a {@link Json#parse} tree). */
+    private static final class Decoded {
+        final Object pcactn;
+        Decoded(Object pcactn) { this.pcactn = pcactn; }
+    }
+
+    /** The PCActn from the header or the body: a {@link Decoded}, or the {@link PcaResult} refusal. */
+    private static Object decode(String pcaHeader, byte[] body) {
         if (pcaHeader != null && !pcaHeader.isEmpty()) {
             // Header transport: STRICT unpadded base64url -> STRICT UTF-8 JSON text -> strict decode inside the verifier
             // (0.4.1: nothing is trimmed or normalized; whitespace, padding, the standard alphabet or invalid UTF-8 => 401).
@@ -46,7 +81,7 @@ public final class PcaCore {
             } catch (RuntimeException e) {
                 return PcaResult.of(PcaResult.Outcome.UNDECODABLE, "PCActn is not strict JSON: " + e.getMessage());
             }
-            return verify(parsed, audience, now, resolver);
+            return new Decoded(parsed);
         }
 
         if (body != null && body.length > 0) {
@@ -71,7 +106,7 @@ public final class PcaCore {
             if (!(env instanceof Map)) return PcaResult.of(PcaResult.Outcome.ABSENT, "no PCActn in request");
             Object pcactn = ((Map<?, ?>) env).get("pcactn");
             if (pcactn == null) return PcaResult.of(PcaResult.Outcome.ABSENT, "no \"pcactn\" field in request body");
-            return verify(pcactn, audience, now, resolver);
+            return new Decoded(pcactn);
         }
 
         return PcaResult.of(PcaResult.Outcome.ABSENT, "no " + HEADER + " header and no PCActn body");
