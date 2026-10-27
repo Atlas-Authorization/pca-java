@@ -49,6 +49,29 @@ jobs:
       - name: Build + unit tests
         working-directory: ${{ env.PCA_MONO_SDK }}
         run: mvn -B -ntp test
+      # 0.5 parity suites. Already part of the step above; run on their own so a regression shows as its own step. Every
+      # shared vector file they read (decision, passport incl. passport_hardware_vectors, attestation-evidence, intent-state,
+      # ledger, optimistic, mesh, goal) must exist: a missing file or table FAILS, it is never skipped.
+      - name: Decision + model-rules vectors (units, tighten-only, decision lattice, escalation answers, signed model-rules cases)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='DecisionConformanceTest,EscalationTest,DecisionKillTest,ModelRulesVectorsTest'
+      - name: Passport + attestation verifiers (vendor vectors, strict DER, fail-closed tables)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='PassportConformanceTest,PassportKillTest,AttestFoundationTest,AttestStrictDerTest,AttestX509VectorsTest,AttestAmdTest,AttestIntelTest,AttestMaaTest,AttestGcpTest,AttestNvidiaTest'
+      - name: Intent-state, ledger, optimistic and mesh vectors
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='IntentStateVectorsTest,LedgerVectorsTest,OptimisticVectorsTest,MeshConformanceTest,Track3KillTest'
+      - name: Goal vectors (digests, decisions with witnesses, helper functions)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='GoalVectorsTest,GoalKillTest'
       - name: Conformance corpus
         if: ${{ !cancelled() }}
         shell: bash

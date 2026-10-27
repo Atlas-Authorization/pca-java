@@ -78,6 +78,12 @@ public final class IntentV2 {
     public static final class Decision {
         public final List<Check> checks = new ArrayList<>();
         public final Map<String, Object> env = new LinkedHashMap<>();
+        /** The action schema the action was checked against (set when {@code schema} passed), else null. */
+        Object schema;
+        /** Worlds decided by a single oracle (their {@code env.world.<name>} is model-derived, rule 21); empty when none. */
+        List<String> singleSource = List.of();
+        /** Rule 21 compatibility mode in effect: a grant reads model-derived paths and was accepted as legacy (report it degraded). */
+        public boolean legacyModelPolarity;
     }
 
     /** True iff any v2 check would be reported (a malformed present context fails closed, so it counts). */
@@ -105,7 +111,9 @@ public final class IntentV2 {
         if (!optMap(c, "policy")) return "policy must be an object";
         if (c.containsKey("policy")) {
             Map<String, Object> pr = IntentJs.obj(c.get("policy"));
-            for (String k : pr.keySet()) if (!k.equals("session") && !k.equals("schema") && !k.equals("acc") && !k.equals("map")) return "policy: unknown member '" + k + "'";
+            for (String k : pr.keySet()) if (!k.equals("session") && !k.equals("schema") && !k.equals("acc") && !k.equals("map") && !k.equals("model_polarity")) return "policy: unknown member '" + k + "'";
+            if (pr.containsKey("model_polarity") && !"strict".equals(pr.get("model_polarity")) && !"legacy".equals(pr.get("model_polarity")))
+                return "policy.model_polarity must be 'strict' or 'legacy'";
             if (!optMap(pr, "session")) return "policy.session must be an object";
             if (pr.containsKey("session")) {
                 Map<String, Object> o = IntentJs.obj(pr.get("session"));
@@ -135,6 +143,7 @@ public final class IntentV2 {
             }
         }
         if (!optMap(c, "params")) return "params must be an object";
+        if (!optMap(c, "env")) return "env must be an object";
         for (String k : new String[] {"schema", "session", "acc"}) if (!optMap(c, k)) return k + " must be an object";
         if (!optMap(c, "map")) return "map must be an object";
         if (c.containsKey("map")) for (String k : IntentJs.obj(c.get("map")).keySet()) if (!k.equals("disclosure")) return "map: unknown member '" + k + "'";
@@ -488,7 +497,10 @@ public final class IntentV2 {
             run(out, "schema", clockOk, () -> {
                 Object[] matched = new Object[1];
                 String why = schemaStep(p, ctx, matched);
-                if (why == null) out.env.put("canon", ActionSchema.canonProjection(matched[0], verbOf(p), IntentJs.obj(ctx.get("params"))));
+                if (why == null) {
+                    out.schema = matched[0];
+                    out.env.put("canon", ActionSchema.canonProjection(matched[0], verbOf(p), IntentJs.obj(ctx.get("params"))));
+                }
                 return why;
             });
         }
@@ -552,11 +564,85 @@ public final class IntentV2 {
                     if (wb.prov != null) out.env.put("prov", wb.prov);
                     if (wb.cls != null) out.env.put("class", wb.cls);
                 }
+                if (wb.singleSource != null && !wb.singleSource.isEmpty()) out.singleSource = new ArrayList<>(wb.singleSource);
             }
         } else if (mapActive) {
             run(out, "map", clockOk, () -> mapStep(p, ctx));
         }
+        modelRules(p, grant, ctx, out, clockOk, action);
         return out;
+    }
+
+    /** The predicate lists a model-derived path could widen: the grant's allow-list and the ceilings (V5 layers). */
+    private static List<Object> allowSidePredicates(Map<String, Object> env, Context ctx) {
+        List<Object> lists = new ArrayList<>();
+        lists.add(env == null ? null : env.get("predicates"));
+        Object layers = ctx == null ? null : ctx.get("layers");
+        for (String k : new String[] {"org", "site", "std"}) lists.add(layers instanceof Map ? IntentJs.get(IntentJs.get(layers, k), "predicates") : null);
+        return lists;
+    }
+
+    /**
+     * Rules 20 and 21, evaluated last (after {@code classes}, so the verifier-computed env is complete). Both read the signed
+     * ENVELOPE of the stored grant: {@code units} (20) is reported iff {@code envelope.units} is present; {@code tighten} (21)
+     * iff {@code envelope.tighten} or a {@code model_polarity} (envelope or policy) is present, or a grant-side {@code where}
+     * reads a model-derived env path (so that case is refused, never silently skipped). A PCActn with none of these verifies
+     * exactly as a verifier without the two rules.
+     */
+    private static void modelRules(Map<String, Object> p, Map<String, Object> grant, Context ctx, Decision out, boolean clockOk, Map<String, Object> action) {
+        Map<String, Object> env = Authorize.readEnvelope(grant);
+        List<Object> preds = allowSidePredicates(env, ctx);
+        if (env != null && env.containsKey("units")) {
+            run(out, "units", clockOk, () -> {
+                Object doc = out.schema;
+                if (doc == null) {
+                    Object[] matched = new Object[1];
+                    String why = schemaStep(p, ctx, matched);
+                    if (why != null) return why;
+                    doc = matched[0];
+                }
+                Map<String, Object> verb = ActionSchema.schemaVerb(doc, verbOf(p));
+                Map<String, Object> in = new LinkedHashMap<>();
+                in.put("units", env.get("units"));
+                if (IntentJs.own(doc, "units")) in.put("schema_units", IntentJs.get(doc, "units"));
+                if (verb != null && verb.containsKey("params")) in.put("verb_params", verb.get("params"));
+                in.put("verb", verbOf(p));
+                in.put("predicates", preds);
+                net.atlasauth.pca.Decision.UnitsResult d = net.atlasauth.pca.Decision.decideUnits(in);
+                return d.ok ? null : d.reason;
+            });
+        }
+        Object polPolicy = ctx == null ? null : ctx.get("policy", "model_polarity");
+        boolean polDefined;
+        Object polarity = null;
+        if ("strict".equals(polPolicy)) polDefined = false;
+        else if (polPolicy != null) { polDefined = true; polarity = polPolicy; }
+        else if (env != null && env.containsKey("model_polarity")) { polDefined = true; polarity = env.get("model_polarity"); }
+        else polDefined = false;
+        boolean hasTighten = env != null && env.containsKey("tighten");
+        if (hasTighten || polDefined || (ctx != null && ctx.has("policy", "model_polarity"))
+            || !net.atlasauth.pca.Decision.modelPathsRead(preds, out.singleSource).isEmpty()) {
+            final boolean pd = polDefined;
+            final Object pol = polarity;
+            run(out, "tighten", clockOk, () -> {
+                Map<String, Object> in = new LinkedHashMap<>();
+                in.put("predicates", preds);
+                if (hasTighten) in.put("tighten", env.get("tighten"));
+                if (pd) in.put("polarity", pol);
+                in.put("single_source", new ArrayList<Object>(out.singleSource));
+                Map<String, Object> cenv = new LinkedHashMap<>();
+                Object hostEnv = ctx == null ? null : ctx.get("env");
+                if (hostEnv instanceof Map) cenv.putAll(IntentJs.obj(hostEnv));
+                cenv.putAll(out.env);
+                Map<String, Object> cx = new LinkedHashMap<>();
+                cx.put("action", action);
+                cx.put("env", cenv);
+                in.put("context", cx);
+                net.atlasauth.pca.Decision.TightenResult r = net.atlasauth.pca.Decision.decideTighten(in);
+                if (r.legacy) out.legacyModelPolarity = true;
+                return "ok".equals(r.outcome) ? null : (r.reason != null ? r.reason : "refused");
+            });
+        }
     }
 
     /**

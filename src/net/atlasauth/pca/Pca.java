@@ -15,7 +15,7 @@ import org.bouncycastle.math.ec.rfc8032.Ed25519;
 
 /**
  * Reference verifier for the CORE PCActn checks, wire format v2. Byte-matches @atlasauth/pca.
- * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter, then
+ * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter_format, then
  * intent when evaluated (Intent Layer M2; see {@link IntentPolicy}) (wire failure is terminal). Requires BouncyCastle (bcprov-jdk18on, org.bouncycastle.math.ec.rfc8032.Ed25519).
  */
 public final class Pca {
@@ -885,7 +885,7 @@ public final class Pca {
 
     /**
      * Verify a parsed PCActn (Json.parse / parseLenient tree). Check order: wire (terminal), version, audience,
-     * validity, chain, plan_inclusion, leaf_signature, counter. allow = every check true.
+     * validity, chain, plan_inclusion, leaf_signature, counter_format. allow = every check true.
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience) {
         return verifyPcactn(pcactn, grant, now, audience, null);
@@ -898,7 +898,7 @@ public final class Pca {
 
     /**
      * As above with an optional Intent Layer M2 policy (null = none). The {@code intent} check is reported (after
-     * counter) iff the PCActn carries {@code intent} or the policy is active; otherwise the verdict is the pre-M2 one.
+     * counter_format) iff the PCActn carries {@code intent} or the policy is active; otherwise the verdict is the pre-M2 one.
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
                                        IntentPolicy intentPolicy) {
@@ -1001,8 +1001,8 @@ public final class Pca {
             else v.fail("leaf_signature", "signature does not verify under the leaf holder key");
 
             // counter
-            if (Json.isSafeInt(p.get("counter")) && Json.asLong(p.get("counter")) >= 0) v.checks.put("counter", true);
-            else v.fail("counter", "missing or not a non-negative safe integer");
+            if (Json.isSafeInt(p.get("counter")) && Json.asLong(p.get("counter")) >= 0) v.checks.put("counter_format", true);
+            else v.fail("counter_format", "missing or not a non-negative safe integer");
 
             // Intent Layer M2: `intent` (reported iff the PCActn carries intent or the policy is active)
             Object session = p.containsKey("intent_session") ? asMap(p.get("intent_session")).get("session") : null;
@@ -1017,7 +1017,7 @@ public final class Pca {
         }
         // any check not reached (internal error) is a failure; keep normative key order
         Map<String, Boolean> ordered = new LinkedHashMap<>();
-        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter"})
+        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format"})
             ordered.put(k, Boolean.TRUE.equals(v.checks.get(k)));
         if (intentReported) ordered.put("intent", Boolean.TRUE.equals(v.checks.get("intent")));
         // Intent Layer v2 (rules 13-18): reported in pipeline order exactly when IntentV2 reports them (total: never throws)
