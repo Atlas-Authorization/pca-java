@@ -1,5 +1,6 @@
 package net.atlasauth.pca.servlet;
 
+import net.atlasauth.pca.Authorize;
 import net.atlasauth.pca.Pca;
 
 /**
@@ -30,15 +31,56 @@ public final class PcaResult {
     private final Pca.Verdict verdict;
     private final Object pcactn;
     private final String detail;
+    private final Authorize.AuthorizeResult authorization;
 
     PcaResult(Outcome outcome, Pca.Verdict verdict, Object pcactn, String detail) {
+        this(outcome, verdict, pcactn, detail, null);
+    }
+
+    private PcaResult(Outcome outcome, Pca.Verdict verdict, Object pcactn, String detail, Authorize.AuthorizeResult authorization) {
         this.outcome = outcome;
         this.verdict = verdict;
         this.pcactn = pcactn;
         this.detail = detail == null ? "" : detail;
+        this.authorization = authorization;
     }
 
     static PcaResult of(Outcome outcome, String detail) { return new PcaResult(outcome, null, null, detail); }
+
+    /** The outcome of the 0.5 authorize pipeline ({@link Outcome#ALLOW} or {@link Outcome#DENIED}, status from the decision). */
+    static PcaResult ofAuthorization(Authorize.AuthorizeResult r, Object pcactn) {
+        return new PcaResult(r.allow ? Outcome.ALLOW : Outcome.DENIED, r.verdict, pcactn, r.reason, r);
+    }
+
+    /**
+     * The {@link Authorize#authorize} decision when the filter / interceptor runs with the authorize option (its
+     * {@code operation} is what an allow is bound to), else {@code null}.
+     */
+    public Authorize.AuthorizeResult authorization() { return authorization; }
+
+    /**
+     * Execute the authorized operation at most once with a durable record (T3), handing the {@code fn} the idempotency key
+     * ({@link net.atlasauth.pca.Operations#executeAuthorized}). Refused ({@code refused}) when this request was not authorized
+     * through the authorize pipeline: nothing runs and nothing is recorded. Answer the request with
+     * {@link PcaCore#operationStatus} and {@link PcaCore#operationBody}.
+     */
+    public net.atlasauth.pca.Operations.ExecuteOutcome execute(net.atlasauth.pca.Operations.OperationFn fn,
+                                                               net.atlasauth.pca.Operations.ExecuteOptions options) {
+        return net.atlasauth.pca.Operations.executeAuthorized(authorization, fn, options);
+    }
+
+    /**
+     * The ternary decision: {@code "allow"}, {@code "escalate"} (an authorize refusal whose every failing check is
+     * escalate-class and that no valid principal answer admitted) or {@code "deny"}. Never {@code "allow"} unless
+     * {@link #allowed()}.
+     */
+    public String decision() { return authorization != null ? authorization.decision : (allowed() ? "allow" : "deny"); }
+
+    /**
+     * On {@code "escalate"}: the request to put to the principal; on an allow admitted by an answer:
+     * {@code {"answered_by": <principal>}}; else {@code null}.
+     */
+    public java.util.Map<String, Object> escalation() { return authorization == null ? null : authorization.escalation; }
 
     public Outcome outcome() { return outcome; }
 
@@ -53,11 +95,18 @@ public final class PcaResult {
 
     public boolean allowed() { return outcome == Outcome.ALLOW; }
 
-    /** HTTP status for a non-allow outcome: {@code 403} for a denying verdict, {@code 401} otherwise. */
-    public int status() { return outcome == Outcome.DENIED ? 403 : 401; }
+    /**
+     * HTTP status for a non-allow outcome: {@code 403} for a denying verdict, {@code 401} otherwise; with the authorize
+     * option a denial carries the decision's own status ({@code 401} unauthenticated proof, {@code 403} otherwise).
+     */
+    public int status() {
+        if (authorization != null && outcome == Outcome.DENIED) return authorization.status;
+        return outcome == Outcome.DENIED ? 403 : 401;
+    }
 
     /** The OAuth-style {@code error} token, or {@code null} for a bare "no credentials" challenge. */
     public String error() {
+        if (authorization != null && outcome == Outcome.DENIED && authorization.status == 401) return "invalid_pcactn";
         switch (outcome) {
             case UNDECODABLE: return "invalid_request";
             case UNKNOWN_GRANT: return "invalid_grant";
@@ -84,10 +133,15 @@ public final class PcaResult {
         sb.append('"').append(jsonEscape(err == null ? "pca_required" : err)).append('"');
         String desc = description();
         if (!desc.isEmpty()) sb.append(",\"error_description\":\"").append(jsonEscape(desc)).append('"');
+        if (authorization != null) {
+            sb.append(",\"decision\":\"").append(authorization.decision).append('"');
+            if (authorization.escalation != null) sb.append(",\"escalation\":").append(net.atlasauth.pca.Json.canonicalize(authorization.escalation));
+        }
         return sb.append('}').toString();
     }
 
     private String description() {
+        if (authorization != null) return detail;
         if (outcome == Outcome.DENIED && verdict != null && verdict.reason != null && !verdict.reason.isEmpty())
             return verdict.reason;
         return detail;

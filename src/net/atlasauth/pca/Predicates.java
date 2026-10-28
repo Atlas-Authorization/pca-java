@@ -392,4 +392,119 @@ public final class Predicates {
             }
         });
     }
+
+    // ---- limit-naming denial reasons (0.5) ----
+
+    private static final Map<String, String> OP_TEXT = Map.ofEntries(
+        Map.entry("eq", "=="), Map.entry("ne", "!="), Map.entry("lt", "<"), Map.entry("lte", "<="), Map.entry("gt", ">"),
+        Map.entry("gte", ">="), Map.entry("in", "in"), Map.entry("nin", "not in"), Map.entry("prefix", "starts with"),
+        Map.entry("like", "like"), Map.entry("matches", "matches"), Map.entry("is_a", "is a"), Map.entry("member_of", "member of"));
+    private static final int MAX_SHOWN_STRING = 64;
+    private static final int MAX_SHOWN_ITEMS = 8;
+
+    private static boolean isGroup(Object c) {
+        return c instanceof Map && (((Map<?, ?>) c).containsKey("all_of") || ((Map<?, ?>) c).containsKey("any_of") || ((Map<?, ?>) c).containsKey("not"));
+    }
+
+    /** A scalar operand in a denial reason: safe integers, booleans, null and plain short strings are spelled out. */
+    static String showValue(Object v, int depth) {
+        if (v == null) return "null";
+        if (v instanceof Boolean) return v.toString();
+        if (v instanceof Json.Num || v instanceof Number) return Json.isSafeInt(v) ? Long.toString(Json.asLong(v)) : "<number>";
+        if (v instanceof String) {
+            String s = (String) v;
+            if (s.length() > MAX_SHOWN_STRING) return "\"...\"";
+            for (int i = 0; i < s.length(); i++) {
+                char ch = s.charAt(i);
+                if (ch < 0x20 || ch == '"' || ch == '\\' || (ch >= 0xD800 && ch <= 0xDFFF)) return "\"...\"";
+            }
+            return "\"" + s + "\"";
+        }
+        if (v instanceof List && depth == 0) {
+            List<?> l = (List<?>) v;
+            if (l.size() > MAX_SHOWN_ITEMS) return "[...]";
+            List<String> parts = new ArrayList<>();
+            for (Object x : l) parts.add(showValue(x, 1));
+            return "[" + String.join(", ", parts) + "]";
+        }
+        return "<value>";
+    }
+
+    /** The condition as the limit a reader recognises: {@code amount <= 500}, {@code currency in ["usd", "eur"]}. */
+    static String describeCondition(Object c, int depth) {
+        if (!isJsObject(c)) return "<condition>";
+        if (isGroup(c)) {
+            Map<?, ?> m = (Map<?, ?>) c;
+            if (depth >= 2) return "(...)";
+            if (m.get("all_of") instanceof List) return "all of (" + describeAll((List<?>) m.get("all_of"), depth) + ")";
+            if (m.get("any_of") instanceof List) return "any of (" + describeAll((List<?>) m.get("any_of"), depth) + ")";
+            if (m.containsKey("not")) return "not (" + describeCondition(m.get("not"), depth + 1) + ")";
+            return "<condition>";
+        }
+        Map<?, ?> m = c instanceof Map ? (Map<?, ?>) c : Map.of();
+        String f = m.get("field") instanceof String ? (String) m.get("field") : "<field>";
+        String name = f.startsWith("action.params.") ? f.substring("action.params.".length()) : f;
+        Object op = m.get("op");
+        if ("exists".equals(op)) return Boolean.FALSE.equals(m.get("value")) ? name + " absent" : name + " present";
+        String text = op instanceof String ? OP_TEXT.get(op) : null;
+        if (text == null) return name + " <condition>";
+        String operand = m.containsKey("ref") ? (m.get("ref") instanceof String ? (String) m.get("ref") : "<ref>")
+            : m.containsKey("value") ? showValue(m.get("value"), 0) : "<value>";
+        return name + " " + text + " " + operand;
+    }
+
+    private static String describeAll(List<?> xs, int depth) {
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < xs.size() && i < MAX_SHOWN_ITEMS; i++) parts.add(describeCondition(xs.get(i), depth + 1));
+        return String.join("; ", parts);
+    }
+
+    /** Inside an unmet top-level condition, the narrowest part that failed (an {@code all_of} points at its first unmet child). */
+    private static Object narrowestUnmet(Object c, Map<String, Object> ctx, int depth) {
+        if (depth < 4 && c instanceof Map && ((Map<?, ?>) c).get("all_of") instanceof List) {
+            for (Object x : (List<?>) ((Map<?, ?>) c).get("all_of")) if (!evaluateCondition(x, ctx)) return narrowestUnmet(x, ctx, depth + 1);
+        }
+        return c;
+    }
+
+    /**
+     * When a predicate's verb and resource are in scope but a {@code where} limit is not met, that limit described
+     * ({@code amount <= 100}); null when no predicate is in scope (the plain "no predicate permits" wording stays).
+     */
+    public static String firstUnmetLimit(Object predicates, Map<String, Object> ctx) {
+        return SafeRegex.withBudget(() -> {
+            try {
+                Object a = ctx == null ? null : ctx.get("action");
+                if (!(a instanceof Map) || !(predicates instanceof List)) return null;
+                Object verb = ((Map<?, ?>) a).get("verb"), resource = ((Map<?, ?>) a).get("resource");
+                if (!(verb instanceof String) || !(resource instanceof String)) return null;
+                for (Object p : (List<?>) predicates) {
+                    if (!(p instanceof Map)) continue;
+                    Map<?, ?> pm = (Map<?, ?>) p;
+                    if (!verbMatches(pm.get("verb"), (String) verb) || !resourceMatches(pm, (String) resource)) continue;
+                    if (!(pm.get("where") instanceof List)) continue;
+                    for (Object c : (List<?>) pm.get("where"))
+                        if (!evaluateCondition(c, ctx)) return describeCondition(narrowestUnmet(c, ctx, 0), 0);
+                }
+                return null;
+            } catch (RuntimeException | StackOverflowError e) {
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Why {@link #evaluatePredicates} denied, or null when it allows: {@code envelope grants no predicates} for an empty
+     * set, {@code <limit> not satisfied for <verb> on <resource>} when a limit in scope is unmet, else
+     * {@code no predicate permits <verb> on <resource>}.
+     */
+    public static String denialReason(Object predicates, Map<String, Object> ctx) {
+        if (evaluatePredicates(predicates, ctx)) return null;
+        if (!(predicates instanceof List) || ((List<?>) predicates).isEmpty()) return "envelope grants no predicates";
+        Object a = ctx == null ? null : ctx.get("action");
+        Map<?, ?> am = a instanceof Map ? (Map<?, ?>) a : Map.of();
+        String vr = IntentRevocation.jsText(am.get("verb"), am.containsKey("verb")) + " on " + IntentRevocation.jsText(am.get("resource"), am.containsKey("resource"));
+        String limit = firstUnmetLimit(predicates, ctx);
+        return limit != null ? limit + " not satisfied for " + vr : "no predicate permits " + vr;
+    }
 }
