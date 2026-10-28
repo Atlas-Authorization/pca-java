@@ -39,12 +39,12 @@ concurrency:
 
 env:
   CRATE: java-pca
-  SHARDS: '8'
+  SHARDS: '12'
   P: net.atlasauth.pca
 
 jobs:
   shard:
-    name: shard ${{ matrix.shard }}/8 (${{ matrix.classes }})
+    name: shard ${{ matrix.shard }}/12 (${{ matrix.classes }})
     runs-on: ubuntu-latest
     timeout-minutes: 340
     strategy:
@@ -53,12 +53,16 @@ jobs:
         include:
           - { shard: 1, classes: 'Pca' }
           - { shard: 2, classes: 'Pca$*' }
-          - { shard: 3, classes: 'Json*,Threshold*' }
+          - { shard: 3, classes: 'Json*,Threshold*,Actions*' }
           - { shard: 4, classes: 'Pq*,Caveats*' }
           - { shard: 5, classes: 'IntentV2*,IntentAcc*' }
           - { shard: 6, classes: 'IntentMap*,IntentSession*,IntentRevocation*,IntentJs*,IntentClassifier*,IntentWB*,IntentArtifacts*' }
           - { shard: 7, classes: 'SafeRegex*,Predicates*' }
-          - { shard: 8, classes: 'rest' }
+          - { shard: 8, classes: 'Authorize*' }
+          - { shard: 9, classes: 'Operation*,AtomicKv*,MemoryAtomicKv*,PcaJdbc*,PlanRegistry*,RevocationStaleness*,Assurance*,StateStore*,MemoryStateStore*,LastStore*' }
+          - { shard: 10, classes: 'stepup.*,servlet.*,spring.*' }
+          - { shard: 11, classes: 'Attest*,AttCert*,CertKey*,DefaultHardware*,HardwareResult*,VendorVerifier*,VendorImpl*' }
+          - { shard: 12, classes: 'rest' }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -108,7 +112,10 @@ jobs:
           p, c = os.environ["P"], os.environ["CLASSES"]
           shards = ["Pca", "Pca$*", "Json*,Threshold*", "Pq*,Caveats*", "IntentV2*,IntentAcc*",
                     "IntentMap*,IntentSession*,IntentRevocation*,IntentJs*,IntentClassifier*,IntentWB*,IntentArtifacts*",
-                    "SafeRegex*,Predicates*"]
+                    "SafeRegex*,Predicates*", "Authorize*",
+                    "Operation*,AtomicKv*,MemoryAtomicKv*,PcaJdbc*,PlanRegistry*,RevocationStaleness*,Assurance*,StateStore*,MemoryStateStore*,LastStore*",
+                    "stepup.*,servlet.*,spring.*",
+                    "Attest*,AttCert*,CertKey*,DefaultHardware*,HardwareResult*,VendorVerifier*,VendorImpl*"]
           par = lambda xs: "".join(f"<param>{p}.{x}</param>" for x in xs)
           if c == "rest":
               block = f"<targetClasses><param>{p}.*</param></targetClasses><excludedClasses>{par(','.join(shards).split(','))}</excludedClasses>"

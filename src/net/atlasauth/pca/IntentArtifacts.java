@@ -38,7 +38,7 @@ final class IntentArtifacts {
 
     /** Null when every key is listed and every required key is present, else the reason. */
     static String closedMembers(Map<String, Object> o, List<String> required, List<String> optional, String where) {
-        for (String k : o.keySet()) if (!required.contains(k) && !optional.contains(k)) return "unknown member '" + where + "." + k + "'";
+        for (String k : Decision.jsKeys(o)) if (!required.contains(k) && !optional.contains(k)) return "unknown member '" + where + "." + k + "'";
         for (String k : required) if (!o.containsKey(k)) return "missing member '" + where + "." + k + "'";
         return null;
     }

@@ -49,6 +49,94 @@ jobs:
       - name: Build + unit tests
         working-directory: ${{ env.PCA_MONO_SDK }}
         run: mvn -B -ntp test
+      # 0.5 parity suites. Already part of the step above; run on their own so a regression shows as its own step. Every
+      # shared vector file they read (decision, passport incl. passport_hardware_vectors, attestation-evidence, intent-state,
+      # ledger, optimistic, mesh, goal) must exist: a missing file or table FAILS, it is never skipped.
+      - name: Decision + model-rules vectors (units, tighten-only, decision lattice, escalation answers, signed model-rules cases)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='DecisionConformanceTest,EscalationTest,DecisionKillTest,ModelRulesVectorsTest'
+      - name: Caveat language v2 vectors (discharges, sealed, narrow, max_uses, derive, spiffe_bound; shared caveat-lang-vectors.json, a missing file fails, never skips)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s ../../packages/pca/conformance/caveat-lang-vectors.json
+          mvn -B -ntp -q test -Dtest='CaveatLangVectorsTest'
+      - name: Forbid-wins certificate and linked policy template vectors (a missing file fails, never skips)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='PolicyAuthoringTest'
+      - name: Passport + attestation verifiers (vendor vectors, strict DER, fail-closed tables)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='PassportConformanceTest,PassportKillTest,AttestFoundationTest,AttestStrictDerTest,AttestX509VectorsTest,AttestAmdTest,AttestIntelTest,AttestMaaTest,AttestGcpTest,AttestNvidiaTest'
+      - name: Intent-state, ledger, optimistic and mesh vectors
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='IntentStateVectorsTest,LedgerVectorsTest,OptimisticVectorsTest,MeshConformanceTest,Track3KillTest'
+      - name: Goal vectors (digests, decisions with witnesses, helper functions)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='GoalVectorsTest,GoalKillTest'
+      - name: Goal binding v3 (approved_goal) commit, invalid and binding vectors
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='GoalCommitVectorsTest'
+      - name: Revocation staleness (age caps, per-class windows, signed epoch, gate, authorize wiring)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='StalenessVectorsTest'
+      - name: Operation records and plan lifecycle (vector replay, concurrency, durable store, executor, authorize plans)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='OperationVectorsTest,PlanVectorsTest'
+      - name: Assurance labels (signature levels, reports, requirement gate, multi-root level, authorize gate)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='AssuranceVectorsTest'
+      - name: Guard options (servlet filter, Spring interceptor, PcaCore; approved goal, staleness, assurance, executor, maturity)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='GuardOptionsTest'
+      - name: Step-up client for the principal device (RFC 8032 vectors, stores, fake transport)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='StepUpClientTest'
+      - name: Store conformance helper (shipped stores pass, racy and non-durable stores fail)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='StoreConformanceTest'
+      - name: K3 operational-plane vectors + fresh_at member (consistency tokens, policy bundles, decision log, list receipts, grant management)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='K3VectorsTest,FreshAtVectorsTest,PcaGrantVectorsTest,BlueprintVectorsTest,A2aVectorsTest,K4VectorsTest,K5VectorsTest,BreakGlassVectorsTest,LeaseVectorsTest,MissingContextVectorsTest,ObligationsVectorsTest,PolicyClassesVectorsTest,ProvenanceVectorsTest,SigstoreVectorsTest'
+      - name: K5 workflow gate inside authorize + tokenisation vault and aggregate reads (shared fixtures; a missing file fails, never skips)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s ../../packages/pca/conformance/authorize-workflow-fixtures.json
+          test -s ../../packages/pca/conformance/vault-aggregate-vectors.json
+          mvn -B -ntp -q test -Dtest='AuthorizeWorkflowTest,GuardWorkflowTest,ReadVaultTest'
+      - name: actions-vectors (action kit, ActionDef parse, canonical digest, trait expansion, floor check, schema v2, pack proofs)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q test -Dtest='ActionVectorsTest'
       - name: Conformance corpus
         if: ${{ !cancelled() }}
         shell: bash
