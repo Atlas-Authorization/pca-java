@@ -151,7 +151,7 @@ public class IntentV2KillTest {
     static Pca.Verdict verify(Map<String, Object> grant, Map<String, Object> p, Map<String, Object> ctx) {
         return Pca.verifyPcactn(p, grant, NOW, AUD, null, null, IntentV2.Context.fromJson(ctx));
     }
-    static final List<String> CORE = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter", "intent");
+    static final List<String> CORE = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format", "intent");
     static List<String> keys(String... extra) { List<String> k = new ArrayList<>(CORE); k.addAll(Arrays.asList(extra)); return k; }
     static List<String> failed(Pca.Verdict v) {
         List<String> f = new ArrayList<>();

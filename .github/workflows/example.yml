@@ -1,0 +1,35 @@
+name: Example
+
+# The runnable Spring Boot server under examples/spring-boot-server: install the library into the local Maven repository,
+# then build and test the example against it (its smoke test sends a real proof and asserts an allow and a refusal with a
+# `doc` link). The example is its own build and is not part of the library artifact.
+on:
+  push:
+    branches: [main, 'ci/**']
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spring-boot-server:
+    name: Spring Boot example
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Install the library into the local Maven repository
+        run: mvn -B -ntp -Dmaven.test.skip=true install
+      - name: Build and test the example
+        working-directory: examples/spring-boot-server
+        run: mvn -B -ntp test

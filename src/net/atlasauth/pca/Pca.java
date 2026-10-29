@@ -15,12 +15,14 @@ import org.bouncycastle.math.ec.rfc8032.Ed25519;
 
 /**
  * Reference verifier for the CORE PCActn checks, wire format v2. Byte-matches @atlasauth/pca.
- * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter, then
+ * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter_format, then
  * intent when evaluated (Intent Layer M2; see {@link IntentPolicy}) (wire failure is terminal). Requires BouncyCastle (bcprov-jdk18on, org.bouncycastle.math.ec.rfc8032.Ed25519).
  */
 public final class Pca {
     private Pca() {}
 
+    /** The maturity tier of this SDK (the same value as the {@code pca.maturity} build property). */
+    public static final String MATURITY = "stable";
     public static final int WIRE_VERSION = 2;
     public static final int MAX_CHAIN_HOPS = 16;
     /** Shared hard caveat caps (all PCA verifiers): per-hop cumulative list, and the sum over every hop of a chain. */
@@ -63,6 +65,8 @@ public final class Pca {
 
     // ---- Intent Layer M2: envelope.intent ----
     public static final String INTENT_GOAL_PREFIX = "pca-intent:v1:";
+    /** Goal binding v3: {@code pca-intent:v3:<goal_digest>:<policy_digest>} (the digests of the approved Goal IR and its compiled policy). */
+    public static final String INTENT_GOAL_V3_PREFIX = "pca-intent:v3:";
     /** Domain of the root grant's salted goal commitment (envelope goal_commit). */
     public static final String INTENT_GOAL_COMMIT_DOMAIN = "atlas-pca/goal/v1\0";
     public static final long PPM_ONE = 1_000_000L;
@@ -84,18 +88,34 @@ public final class Pca {
         public final Double minFidelityPpm;
         /** Deny when the claimed {@code residual_risk_ppm} is above this (null = unset). Setting it implies require. */
         public final Double maxResidualRiskPpm;
+        /**
+         * Goal binding v3: the root grant must open against exactly this approved Goal IR + compiled policy (a closed object
+         * {@code goal_digest, policy_digest}, see {@link Pca#approvedGoal}). Null = unset. Setting it implies require. Any value
+         * that is not a well-formed reference is a misconfiguration and fails the {@code intent} check closed.
+         */
+        public final Object approvedGoal;
 
         public IntentPolicy(boolean require, Double minFidelityPpm, Double maxResidualRiskPpm) {
+            this(require, minFidelityPpm, maxResidualRiskPpm, null);
+        }
+
+        public IntentPolicy(boolean require, Double minFidelityPpm, Double maxResidualRiskPpm, Object approvedGoal) {
             this.require = require;
             this.minFidelityPpm = minFidelityPpm;
             this.maxResidualRiskPpm = maxResidualRiskPpm;
+            this.approvedGoal = approvedGoal;
+        }
+
+        /** A policy that binds every intent to the approved goal (v3): {@code {approved_goal}}. */
+        public static IntentPolicy approvedGoalPolicy(String goalDigest, String policyDigest) {
+            return new IntentPolicy(false, null, null, approvedGoal(goalDigest, policyDigest));
         }
 
         /** {@code {require: true}}. */
         public static IntentPolicy required() { return new IntentPolicy(true, null, null); }
 
         /** True iff the policy is active (the intent check runs even for a PCActn without the field). */
-        public boolean isActive() { return require || minFidelityPpm != null || maxResidualRiskPpm != null; }
+        public boolean isActive() { return require || minFidelityPpm != null || maxResidualRiskPpm != null || approvedGoal != null; }
 
         /**
          * From a parsed JSON object {@code {require?, min_fidelity_ppm?, max_residual_risk_ppm?}} (Json.parse /
@@ -105,8 +125,10 @@ public final class Pca {
         public static IntentPolicy fromJson(Object o) {
             if (!(o instanceof Map)) return null;
             Map<?, ?> m = (Map<?, ?>) o;
+            // a present approved_goal that is not an object (JSON null included) is kept as an invalid marker: it fails closed
+            Object ag = !m.containsKey("approved_goal") ? null : m.get("approved_goal") instanceof Map ? m.get("approved_goal") : new Object();
             return new IntentPolicy(Boolean.TRUE.equals(m.get("require")),
-                threshold(m, "min_fidelity_ppm"), threshold(m, "max_residual_risk_ppm"));
+                threshold(m, "min_fidelity_ppm"), threshold(m, "max_residual_risk_ppm"), ag);
         }
 
         /**
@@ -140,6 +162,37 @@ public final class Pca {
     /** The goal string that binds a grant to an intent statement and Intent Map. */
     public static String intentGoal(String ref, String mapDigest) {
         return INTENT_GOAL_PREFIX + ref + (mapDigest != null && !mapDigest.isEmpty() ? ":" + mapDigest : "");
+    }
+
+    /** An approved-goal reference {@code {goal_digest, policy_digest}} (not validated here: see {@link #isApprovedGoalRef}). */
+    public static Map<String, Object> approvedGoal(String goalDigest, String policyDigest) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("goal_digest", goalDigest);
+        m.put("policy_digest", policyDigest);
+        return m;
+    }
+
+    /** Well-formed: a closed object of exactly {@code goal_digest} and {@code policy_digest}, each canonical base64url of 32 bytes. */
+    public static boolean isApprovedGoalRef(Object v) {
+        if (!(v instanceof Map)) return false;
+        Map<?, ?> r = (Map<?, ?>) v;
+        return r.size() == 2 && decodeB64uStrict(r.get("goal_digest"), 32) != null && decodeB64uStrict(r.get("policy_digest"), 32) != null;
+    }
+
+    /** The v3 goal string. Throws {@link IllegalArgumentException} on a malformed reference: never commit to garbage. */
+    public static String intentGoalV3(Object ref) {
+        if (!isApprovedGoalRef(ref)) throw new IllegalArgumentException("intentGoalV3: goal_digest and policy_digest must be canonical base64url (32 bytes)");
+        Map<?, ?> r = (Map<?, ?>) ref;
+        return INTENT_GOAL_V3_PREFIX + r.get("goal_digest") + ":" + r.get("policy_digest");
+    }
+
+    /** The v3 goal commitment for a salt. */
+    public static String intentGoalCommitV3(Object ref, String goalSalt) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("d", INTENT_GOAL_COMMIT_DOMAIN);
+        m.put("goal", intentGoalV3(ref));
+        m.put("salt", goalSalt);
+        return hashCanonical(m);
     }
 
     /** The goal commitment an {@code envelope.intent} claims the root grant carries. */
@@ -227,11 +280,17 @@ public final class Pca {
         try {
             if (active && (!okThreshold(policy.minFidelityPpm) || !okThreshold(policy.maxResidualRiskPpm)))
                 return "intent policy misconfigured: thresholds must be non-negative safe integers (fail closed)";
+            if (active && policy.approvedGoal != null && !isApprovedGoalRef(policy.approvedGoal))
+                return "intent policy misconfigured: approved_goal digests must be canonical base64url (32 bytes) (fail closed)";
             if (!present) return "this verifier requires an intent binding but the PCActn carries none";
             String commit = rootGoalCommit(grant);
             if (commit == null) return "the root grant carries no envelope goal commitment to bind the intent to";
             Map<String, Object> i = (Map<String, Object>) intent;
-            String opened = session != null
+            if (policy != null && policy.approvedGoal != null) {
+                if (!intentGoalCommitV3(policy.approvedGoal, (String) i.get("goal_salt")).equals(commit))
+                    return "the root grant's goal commitment does not open to the approved goal and compiled policy (v3)";
+            }
+            String opened = policy != null && policy.approvedGoal != null ? commit : session != null
                 ? (IntentMap.MAP_FORM_COMMIT.equals(mapForm)
                     ? intentGoalCommitV2c(session, (String) i.get("map_digest"), (String) i.get("goal_salt"))
                     : intentGoalCommitV2(session, (String) i.get("map_digest"), (String) i.get("goal_salt")))
@@ -672,6 +731,8 @@ public final class Pca {
         "intent",
         // Intent Layer v2 (additive, SIGNED): the session member (rule 13; see IntentSession.validateWire / IntentV2).
         "intent_session",
+        // K3 consistency token (additive, SIGNED): the `fresh_at` member (see K3.validateFreshAtWire / K3.decideFreshAt).
+        "fresh_at",
         // B4 crypto-agility (additive): absent `alg` == "ed25519" and validates exactly as today.
         "alg", "pq_pk", "pq_sig");
 
@@ -815,6 +876,10 @@ public final class Pca {
                 String sessionErr = IntentSession.validateWire(p.get("intent_session"));
                 if (sessionErr != null) return sessionErr;
             }
+            if (p.containsKey("fresh_at")) {
+                String freshErr = K3.validateFreshAtWire(p.get("fresh_at"));
+                if (freshErr != null) return freshErr;
+            }
             if (p.containsKey("prohibition_evidence") && !isObj(p.get("prohibition_evidence")) && !(p.get("prohibition_evidence") instanceof List))
                 return "'prohibition_evidence' must be an object or array";
             if (p.containsKey("threshold")) {
@@ -867,6 +932,12 @@ public final class Pca {
     /** As above with the Intent Layer v2 verifier state (null = none: the v2 checks run only for a PCActn carrying intent_session). */
     public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
                                            IntentPolicy intentPolicy, IntentV2.Context intentV2) {
+        return verifyPcactnJson(text, grant, now, audience, allowedSuites, intentPolicy, intentV2, null);
+    }
+
+    /** As above with the K3 {@code fresh_at} consistency-token policy (null = none: a PCActn carrying {@code fresh_at} is then refused, fail closed). */
+    public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                           IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt) {
         if (text != null && artifactTooLarge(text)) { // FIRST: before any parsing (null: refused by the strict parse below)
             Verdict big = new Verdict();
             big.fail("wire", ARTIFACT_SIZE_REASON);
@@ -880,12 +951,12 @@ public final class Pca {
             v.fail("wire", "strict JSON: " + e.getMessage());
             return v;
         }
-        return verifyPcactn(parsed, grant, now, audience, allowedSuites, intentPolicy, intentV2);
+        return verifyPcactn(parsed, grant, now, audience, allowedSuites, intentPolicy, intentV2, freshAt);
     }
 
     /**
      * Verify a parsed PCActn (Json.parse / parseLenient tree). Check order: wire (terminal), version, audience,
-     * validity, chain, plan_inclusion, leaf_signature, counter. allow = every check true.
+     * validity, chain, plan_inclusion, leaf_signature, counter_format. allow = every check true.
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience) {
         return verifyPcactn(pcactn, grant, now, audience, null);
@@ -898,7 +969,7 @@ public final class Pca {
 
     /**
      * As above with an optional Intent Layer M2 policy (null = none). The {@code intent} check is reported (after
-     * counter) iff the PCActn carries {@code intent} or the policy is active; otherwise the verdict is the pre-M2 one.
+     * counter_format) iff the PCActn carries {@code intent} or the policy is active; otherwise the verdict is the pre-M2 one.
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
                                        IntentPolicy intentPolicy) {
@@ -913,9 +984,19 @@ public final class Pca {
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
                                        IntentPolicy intentPolicy, IntentV2.Context intentV2) {
+        return verifyPcactn(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2, null);
+    }
+
+    /**
+     * As above with the K3 {@code fresh_at} consistency-token policy ({@link K3.FreshAtPolicy}; null = none). After the intent checks a
+     * {@code fresh_at} check is reported exactly when the PCActn carries the member, a side-carried token is read, or the policy
+     * requires one; a stale verifier is an {@code escalate:} failure. Without the member and without a policy the verdict is unchanged.
+     */
+    public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                       IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt) {
         // TOTAL (R6-05): any residual fault on hostile input is a terminal wire refusal, never an exception.
         try {
-            return verifyPcactnUnchecked(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2);
+            return verifyPcactnUnchecked(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2, freshAt);
         } catch (RuntimeException ex) {
             Verdict w = new Verdict();
             w.fail("wire", "malformed input (" + ex.getClass().getSimpleName() + ")");
@@ -924,7 +1005,7 @@ public final class Pca {
     }
 
     private static Verdict verifyPcactnUnchecked(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
-                                                 IntentPolicy intentPolicy, IntentV2.Context intentV2) {
+                                                 IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt) {
         Verdict v = new Verdict();
         String wire = validateWireV2(pcactn);
         if (wire != null) {
@@ -1001,8 +1082,8 @@ public final class Pca {
             else v.fail("leaf_signature", "signature does not verify under the leaf holder key");
 
             // counter
-            if (Json.isSafeInt(p.get("counter")) && Json.asLong(p.get("counter")) >= 0) v.checks.put("counter", true);
-            else v.fail("counter", "missing or not a non-negative safe integer");
+            if (Json.isSafeInt(p.get("counter")) && Json.asLong(p.get("counter")) >= 0) v.checks.put("counter_format", true);
+            else v.fail("counter_format", "missing or not a non-negative safe integer");
 
             // Intent Layer M2: `intent` (reported iff the PCActn carries intent or the policy is active)
             Object session = p.containsKey("intent_session") ? asMap(p.get("intent_session")).get("session") : null;
@@ -1017,13 +1098,20 @@ public final class Pca {
         }
         // any check not reached (internal error) is a failure; keep normative key order
         Map<String, Boolean> ordered = new LinkedHashMap<>();
-        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter"})
+        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format"})
             ordered.put(k, Boolean.TRUE.equals(v.checks.get(k)));
         if (intentReported) ordered.put("intent", Boolean.TRUE.equals(v.checks.get("intent")));
         // Intent Layer v2 (rules 13-18): reported in pipeline order exactly when IntentV2 reports them (total: never throws)
         for (IntentV2.Check c : IntentV2.decide(p, grant, intentV2, now).checks) {
             ordered.put(c.name, c.ok);
             if (!c.ok && v.reason.isEmpty()) v.reason = c.name + ": " + c.reason;
+        }
+        // K3 consistency token: `fresh_at` (reported only when the PCActn carries the member, a side-carried token is read, or the policy requires one)
+        K3.FreshAtCheck fa = K3.decideFreshAt(p.containsKey("fresh_at"), p.get("fresh_at"), freshAt, now);
+        if (fa.status.equals("pass")) ordered.put("fresh_at", true);
+        else if (fa.status.equals("fail")) {
+            ordered.put("fresh_at", false);
+            if (v.reason.isEmpty()) v.reason = "fresh_at: " + fa.reason;
         }
         v.checks.clear();
         v.checks.putAll(ordered);

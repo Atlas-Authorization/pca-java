@@ -28,12 +28,20 @@ public final class ActionSchema {
     public static final int DEFAULT_MAX_ITEMS = 64;
     static final Pattern PARAM_PATH_RE = Pattern.compile("action\\.params\\.[A-Za-z0-9_]{1,64}");
     static final Pattern UNIT_ID_RE = Pattern.compile("[a-z0-9_]+(?:\\.[a-z0-9_]+)*");
+    static final Pattern PARAM_PATH_RE_V2 = Pattern.compile("action\\.params\\.[A-Za-z0-9_]{1,64}(?:\\.[A-Za-z0-9_]{1,64}){0,2}");
     private static final Pattern DATE_RE = Pattern.compile("([0-9]{4})-([0-9]{2})-([0-9]{2})");
     static final java.util.Set<String> RESERVED_NAMES = java.util.Set.of("__proto__", "constructor", "prototype");
     static final List<String> SENSITIVITIES = List.of("free", "material", "critical");
     static final List<String> SCHEMA_REVERSIBILITY = List.of("reversible", "rate_limited", "irreversible");
     static final List<String> PARAM_TYPES = List.of("string", "integer", "boolean", "date", "set", "array");
+    static final List<String> PARAM_TYPES_V2 = List.of("string", "integer", "boolean", "date", "set", "array", "datetime", "duration", "object_ref");
+    static final List<String> SCHEMA_V2_EFFECTS = Actions.EFFECTS;
+    static final List<String> SCHEMA_V2_TAGS = Actions.PARAM_TAGS;
     private static final List<String> DOC_KEYS = List.of("v", "kind", "site", "aud", "version", "units", "state", "verbs", "sig");
+    private static final List<String> DOC_KEYS_V2 = List.of("v", "kind", "site", "aud", "version", "units", "state", "verbs", "sig", "traits_digest", "trait_defs", "pack");
+    private static final List<String> VERB_KEYS_V2 = List.of("verb", "kind", "params", "reversibility", "reversibility_by", "mcp", "openapi", "harm", "world", "effects", "returns", "description", "traits", "def", "floors", "confirmation");
+    private static final List<String> PARAM_KEYS_V2 = List.of("type", "semantic", "sensitivity", "required", "values", "min", "max", "unit", "max_len", "items",
+        "min_items", "max_items", "default", "principal_neutral_default", "accumulates_into", "issued_by_site", "description", "role", "format", "tags", "provenance_min");
     private static final List<String> VERB_KEYS = List.of("verb", "kind", "params", "reversibility", "reversibility_by", "mcp", "openapi", "harm", "world", "effects", "returns", "description");
     private static final List<String> PARAM_KEYS = List.of("type", "semantic", "sensitivity", "required", "values", "min", "max", "unit", "max_len", "items",
         "min_items", "max_items", "default", "principal_neutral_default", "accumulates_into", "issued_by_site", "description");
@@ -56,14 +64,14 @@ public final class ActionSchema {
     private static boolean in(List<String> xs, Object v) { return v instanceof String && xs.contains(v); }
     private static boolean distinct(List<?> xs) { return new HashSet<Object>(xs).size() == xs.size(); }
 
-    private static String paramDeclError(String path, Object dO, Object units) {
-        if (!PARAM_PATH_RE.matcher(path).matches()) return "parameter path '" + path + "' is not action.params.<name>";
-        if (RESERVED_NAMES.contains(path.substring("action.params.".length()))) return "parameter name '" + path + "' is reserved (__proto__ / constructor / prototype)";
+    private static String paramDeclError(String path, Object dO, Object units, boolean v2) {
+        if (!(v2 ? PARAM_PATH_RE_V2 : PARAM_PATH_RE).matcher(path).matches()) return "parameter path '" + path + "' is not action.params.<name>";
+        for (String seg : path.substring("action.params.".length()).split("\\.", -1)) if (RESERVED_NAMES.contains(seg)) return "parameter name '" + path + "' is reserved (__proto__ / constructor / prototype)";
         if (!(dO instanceof Map)) return path + ": declaration must be an object";
         Map<String, Object> d = IntentJs.obj(dO);
-        for (String k : d.keySet()) if (!PARAM_KEYS.contains(k)) return path + ": unknown member '" + k + "'";
+        for (String k : d.keySet()) if (!(v2 ? PARAM_KEYS_V2 : PARAM_KEYS).contains(k)) return path + ": unknown member '" + k + "'";
         Object type = d.get("type");
-        if (!in(PARAM_TYPES, type)) return path + ": unknown type";
+        if (!in(v2 ? PARAM_TYPES_V2 : PARAM_TYPES, type)) return path + ": unknown type";
         if (!isStr(d.get("semantic"), 128)) return path + ": semantic must be a non-empty string";
         if (!in(SENSITIVITIES, d.get("sensitivity"))) return path + ": unknown sensitivity";
         if (d.containsKey("required") && !(d.get("required") instanceof Boolean)) return path + ": required must be a boolean";
@@ -78,7 +86,7 @@ public final class ActionSchema {
         if ("set".equals(type) && !d.containsKey("values")) return path + ": a set needs values";
         boolean intItems = "array".equals(type) && "integer".equals(d.get("items"));
         for (String k : new String[] {"min", "max"}) {
-            if (d.containsKey(k) && (!IntentJs.isInt(d.get(k)) || (!"integer".equals(type) && !intItems))) return path + ": " + k + " must be a safe integer on an integer parameter";
+            if (d.containsKey(k) && (!IntentJs.isInt(d.get(k)) || (!"integer".equals(type) && !(v2 && "duration".equals(type)) && !intItems))) return path + ": " + k + " must be a safe integer on an integer parameter";
         }
         if (IntentJs.isInt(d.get("min")) && IntentJs.isInt(d.get("max")) && IntentJs.num(d.get("min")) > IntentJs.num(d.get("max"))) return path + ": min > max";
         if (d.containsKey("unit") && (!"integer".equals(type) || !(d.get("unit") instanceof String) || !(units instanceof Map) || !((Map<?, ?>) units).containsKey(d.get("unit"))))
@@ -102,8 +110,44 @@ public final class ActionSchema {
         }
         if (d.containsKey("issued_by_site") && !(d.get("issued_by_site") instanceof Boolean)) return path + ": issued_by_site must be a boolean";
         if (d.containsKey("description") && !isStr(d.get("description"), 1024)) return path + ": description must be a string";
+        if (v2) {
+            if (d.containsKey("role") && !isStr(d.get("role"), 128)) return path + ": role must be a non-empty string";
+            if (d.containsKey("format") && (!(d.get("format") instanceof String) || formatCheck((String) d.get("format")) == null || !("string".equals(type) || "object_ref".equals(type))))
+                return path + ": format must be a known format on a string parameter";
+            if (d.containsKey("tags")) {
+                Object tg = d.get("tags");
+                boolean ok = tg instanceof List && ((List<?>) tg).size() <= SCHEMA_V2_TAGS.size();
+                if (ok) for (Object x : (List<?>) tg) if (!in(SCHEMA_V2_TAGS, x)) { ok = false; break; }
+                if (!ok || !distinct((List<?>) tg)) return path + ": tags must be distinct known tags";
+            }
+            if (d.containsKey("provenance_min") && !in(Actions.PROVENANCE_LEVELS, d.get("provenance_min"))) return path + ": unknown provenance_min";
+        }
         return null;
     }
+
+    /** Null if {@code fO} is a well-formed materialized profile (v2 {@code floors}; shape only, the semantic check is rule 22). */
+    static String schemaFloorsError(Object fO) {
+        if (!(fO instanceof Map)) return "floors must be an object";
+        Map<String, Object> f = IntentJs.obj(fO);
+        for (String k : f.keySet()) if (!List.of("risk", "rev", "blast_ppm", "esc", "caveats", "context", "prules").contains(k)) return "floors: unknown member '" + k + "'";
+        if (!rng(f.get("risk"), 0, 3) || !rng(f.get("esc"), 0, 3)) return "floors.risk and floors.esc must be integers in 0..3";
+        if (!in(SCHEMA_REVERSIBILITY, f.get("rev"))) return "floors.rev is not a reversibility class";
+        if (!rng(f.get("blast_ppm"), 0, 1_000_000)) return "floors.blast_ppm must be an integer in 0..1000000";
+        for (String name : new String[] {"caveats", "context", "prules"}) {
+            Object a = f.get(name);
+            boolean ok = a instanceof List && ((List<?>) a).size() <= 64;
+            if (ok) for (Object x : (List<?>) a) {
+                boolean known = name.equals("caveats") ? in(Actions.CAVEAT_KINDS, x) : name.equals("prules") ? in(Actions.PARAM_RULE_IDS, x) : Actions.isContextKey(x);
+                if (!known) { ok = false; break; }
+            }
+            if (!ok) return "floors." + name + " must be an array of known entries";
+            List<?> l = (List<?>) a;
+            for (int i = 1; i < l.size(); i++) if (((String) l.get(i - 1)).compareTo((String) l.get(i)) >= 0) return "floors." + name + " must be sorted and distinct";
+        }
+        return null;
+    }
+
+    private static boolean rng(Object x, int lo, int hi) { return IntentJs.isInt(x) && IntentJs.num(x) >= lo && IntentJs.num(x) <= hi; }
 
     private static boolean exactKeys(Object o, String... keys) {
         if (!(o instanceof Map)) return false;
@@ -113,10 +157,10 @@ public final class ActionSchema {
         return true;
     }
 
-    private static String verbDeclError(Object vO, Object units) {
+    private static String verbDeclError(Object vO, Object units, boolean v2) {
         if (!(vO instanceof Map)) return "verb entry must be an object";
         Map<String, Object> v = IntentJs.obj(vO);
-        for (String k : v.keySet()) if (!VERB_KEYS.contains(k)) return "verb entry: unknown member '" + k + "'";
+        for (String k : v.keySet()) if (!(v2 ? VERB_KEYS_V2 : VERB_KEYS).contains(k)) return "verb entry: unknown member '" + k + "'";
         if (!isStr(v.get("verb"), 128)) return "verb entry: verb must be a non-empty string";
         String at = "verb '" + v.get("verb") + "'";
         if (!"read".equals(v.get("kind")) && !"write".equals(v.get("kind"))) return at + ": kind must be read or write";
@@ -124,9 +168,10 @@ public final class ActionSchema {
         Map<String, Object> params = IntentJs.obj(v.get("params"));
         if (params.size() > MAX_SCHEMA_PARAMS) return at + ": more than " + MAX_SCHEMA_PARAMS + " parameters";
         for (Map.Entry<String, Object> e : params.entrySet()) {
-            String err = paramDeclError(e.getKey(), e.getValue(), units);
+            String err = paramDeclError(e.getKey(), e.getValue(), units, v2);
             if (err != null) return at + ": " + err;
         }
+        if (v2) for (String p : params.keySet()) for (String q : params.keySet()) if (!q.equals(p) && q.startsWith(p + ".")) return at + ": parameter '" + p + "' is both a value and the parent of '" + q + "'";
         if (v.containsKey("reversibility") && !in(SCHEMA_REVERSIBILITY, v.get("reversibility"))) return at + ": unknown reversibility";
         if (v.containsKey("reversibility_by")) {
             Object rO = v.get("reversibility_by");
@@ -142,19 +187,75 @@ public final class ActionSchema {
         }
         if (v.containsKey("mcp") && (!exactKeys(v.get("mcp"), "tool") || !isStr(IntentJs.get(v.get("mcp"), "tool"), 128))) return at + ": mcp must be {tool}";
         if (v.containsKey("openapi") && (!exactKeys(v.get("openapi"), "operationId") || !isStr(IntentJs.get(v.get("openapi"), "operationId"), 128))) return at + ": openapi must be {operationId}";
-        for (String k : new String[] {"harm", "effects", "returns"}) if (v.containsKey(k) && !(v.get(k) instanceof Map)) return at + ": " + k + " must be an object";
+        for (String k : v2 ? new String[] {"harm", "returns"} : new String[] {"harm", "effects", "returns"}) if (v.containsKey(k) && !(v.get(k) instanceof Map)) return at + ": " + k + " must be an object";
+        if (v2) {
+            Object ef = v.get("effects");
+            boolean ok = ef instanceof List && !((List<?>) ef).isEmpty() && ((List<?>) ef).size() <= SCHEMA_V2_EFFECTS.size();
+            if (ok) for (Object x : (List<?>) ef) if (!in(SCHEMA_V2_EFFECTS, x)) { ok = false; break; }
+            if (!ok) return at + ": effects must be 1.." + SCHEMA_V2_EFFECTS.size() + " known effects";
+            List<?> efl = (List<?>) ef;
+            boolean allRead = true;
+            for (int i = 0; i < efl.size(); i++) {
+                if (i > 0 && ((String) efl.get(i - 1)).compareTo((String) efl.get(i)) >= 0) return at + ": effects must be sorted and distinct";
+                if (!"read".equals(efl.get(i))) allRead = false;
+            }
+            if ("read".equals(v.get("kind")) != allRead) return at + ": kind read must hold exactly when every effect is read";
+            Object tr = v.get("traits");
+            boolean tok = tr instanceof List && ((List<?>) tr).size() <= 64;
+            if (tok) for (Object x : (List<?>) tr) if (!(x instanceof String) || !Actions.TRAIT_ID_RE.matcher((String) x).matches()) { tok = false; break; }
+            if (!tok) return at + ": traits must be trait ids";
+            List<?> trl = (List<?>) tr;
+            for (int i = 1; i < trl.size(); i++) if (((String) trl.get(i - 1)).compareTo((String) trl.get(i)) >= 0) return at + ": traits must be sorted and distinct";
+            if (Pca.decodeB64uStrict(v.get("def"), 32) == null) return at + ": def must be a canonical base64url SHA-256 digest";
+            String fe = schemaFloorsError(v.get("floors"));
+            if (fe != null) return at + ": " + fe;
+            if (v.containsKey("confirmation")) {
+                String ce = confirmationShapeError(v.get("confirmation"));
+                if (ce != null) return at + ": " + ce;
+            }
+        }
         if (v.containsKey("world") && !(v.get("world") instanceof List)) return at + ": world must be an array";
         if (v.containsKey("description") && !isStr(v.get("description"), 1024)) return at + ": description must be a string";
         return null;
     }
 
+    private static final List<String> CONFIRMATION_KEYS = List.of("def_digest", "traits_digest", "facts_digest", "final_traits", "dismissed", "reviewer_kid", "ts", "sig");
+
+    /** Null if {@code cO} is a well-formed verb {@code confirmation} (shape only; the signature check is rule 22). */
+    static String confirmationShapeError(Object cO) {
+        if (!(cO instanceof Map)) return "confirmation must be an object";
+        Map<String, Object> c = IntentJs.obj(cO);
+        for (String k : c.keySet()) if (!CONFIRMATION_KEYS.contains(k)) return "confirmation: unknown member '" + k + "'";
+        if (Pca.decodeB64uStrict(c.get("def_digest"), 32) == null || Pca.decodeB64uStrict(c.get("traits_digest"), 32) == null || Pca.decodeB64uStrict(c.get("facts_digest"), 32) == null) return "confirmation: def_digest, traits_digest and facts_digest must be canonical base64url SHA-256 digests";
+        if (Pca.decodeB64uStrict(c.get("sig"), 64) == null) return "confirmation: sig must be a canonical base64url 64-byte signature";
+        Object ft = c.get("final_traits");
+        boolean ok = ft instanceof List && ((List<?>) ft).size() <= 64;
+        if (ok) for (Object x : (List<?>) ft) if (!(x instanceof String) || !Actions.TRAIT_ID_RE.matcher((String) x).matches()) { ok = false; break; }
+        if (!ok) return "confirmation: final_traits must be trait ids";
+        List<?> fl = (List<?>) ft;
+        for (int i = 1; i < fl.size(); i++) if (((String) fl.get(i - 1)).compareTo((String) fl.get(i)) >= 0) return "confirmation: final_traits must be sorted and distinct";
+        Object dm = c.get("dismissed");
+        if (!(dm instanceof List) || ((List<?>) dm).size() > 64) return "confirmation: dismissed must be an array";
+        for (Object d : (List<?>) dm) {
+            if (!(d instanceof Map) || !List.of("trait", "reason").containsAll(((Map<?, ?>) d).keySet()) || !(IntentJs.get(d, "trait") instanceof String)
+                || !Actions.TRAIT_ID_RE.matcher((String) IntentJs.get(d, "trait")).matches() || !isStr(IntentJs.get(d, "reason"), 256)) return "confirmation: dismissed entries must be {trait, reason}";
+        }
+        if (!isStr(c.get("reviewer_kid"), 128)) return "confirmation: reviewer_kid must be a non-empty string";
+        if (!IntentJs.isNonNeg(c.get("ts"))) return "confirmation: ts must be a non-negative safe integer";
+        return null;
+    }
+
     /** Structural validation of a signed schema. Null = well-formed. Never throws. */
-    public static String shapeError(Object docO) {
+    public static String shapeError(Object docO) { return shapeError(docO, true); }
+
+    /** As {@link #shapeError(Object)}; with {@code signed == false} the document must not carry {@code sig} (the unsigned schema a site builds before signing). */
+    public static String shapeError(Object docO, boolean signed) {
         try {
             if (!(docO instanceof Map)) return "schema is not an object";
             Map<String, Object> doc = IntentJs.obj(docO);
-            for (String k : doc.keySet()) if (!DOC_KEYS.contains(k)) return "unknown member '" + k + "'";
-            if (!OracleFacts.isOne(doc.get("v"))) return "unsupported schema version";
+            boolean v2 = isTwo(doc.get("v"));
+            for (String k : doc.keySet()) if (!(v2 ? DOC_KEYS_V2 : DOC_KEYS).contains(k)) return "unknown member '" + k + "'";
+            if (!OracleFacts.isOne(doc.get("v")) && !v2) return "unsupported schema version";
             if (!ACTION_SCHEMA_KIND.equals(doc.get("kind"))) return "kind must be '" + ACTION_SCHEMA_KIND + "'";
             if (!isStr(doc.get("site"), 2048) || !isStr(doc.get("aud"), 256) || !isStr(doc.get("version"), 128)) return "site, aud and version must be non-empty strings";
             if (doc.containsKey("units")) {
@@ -171,24 +272,40 @@ public final class ActionSchema {
                 }
             }
             if (doc.containsKey("state") && !(doc.get("state") instanceof List)) return "state must be an array";
+            if (v2) {
+                if (doc.containsKey("traits_digest") && Pca.decodeB64uStrict(doc.get("traits_digest"), 32) == null) return "traits_digest must be a canonical base64url SHA-256 digest";
+                if (doc.containsKey("trait_defs")) {
+                    Object td = doc.get("trait_defs");
+                    boolean ok = td instanceof List && ((List<?>) td).size() <= 64;
+                    if (ok) for (Object x : (List<?>) td) if (!(x instanceof Map)) { ok = false; break; }
+                    if (!ok) return "trait_defs must be an array of up to 64 objects";
+                }
+                if (doc.containsKey("pack")) {
+                    Object pk = doc.get("pack");
+                    if (!exactKeys(pk, "ns", "root", "version") || !isStr(IntentJs.get(pk, "ns"), 64) || !isStr(IntentJs.get(pk, "version"), 128) || Pca.decodeB64uStrict(IntentJs.get(pk, "root"), 32) == null)
+                        return "pack must be {ns, version, root}";
+                }
+            }
             Object verbs = doc.get("verbs");
             if (!(verbs instanceof List) || ((List<?>) verbs).isEmpty() || ((List<?>) verbs).size() > MAX_SCHEMA_VERBS) return "verbs must be 1.." + MAX_SCHEMA_VERBS + " entries";
             Set<String> seen = new HashSet<>();
             for (Object v : (List<?>) verbs) {
-                String e = verbDeclError(v, doc.get("units"));
+                String e = verbDeclError(v, doc.get("units"), v2);
                 if (e != null) return e;
                 String name = (String) IntentJs.get(v, "verb");
                 if (!seen.add(name)) return "verb '" + name + "' is declared twice";
             }
-            Object s = doc.get("sig");
-            if (!(s instanceof Map)) return "sig must be an object";
-            Map<String, Object> sig = IntentJs.obj(s);
-            for (String k : sig.keySet()) if (!SIG_KEYS.contains(k)) return "sig: unknown member '" + k + "'";
-            String se = IntentJs.suiteError(sig.get("alg"), sig.containsKey("alg"));
-            if (se != null) return "sig.alg: " + se;
-            if (!isStr(sig.get("kid"), 128)) return "sig.kid must be a non-empty string";
-            if (!IntentJs.b64any(sig.get("value"))) return "sig.value is not canonical base64url";
-            if (sig.containsKey("pq_value") && !IntentJs.b64any(sig.get("pq_value"))) return "sig.pq_value is not canonical base64url";
+            if (signed) {
+                Object s = doc.get("sig");
+                if (!(s instanceof Map)) return "sig must be an object";
+                Map<String, Object> sig = IntentJs.obj(s);
+                for (String k : sig.keySet()) if (!SIG_KEYS.contains(k)) return "sig: unknown member '" + k + "'";
+                String se = IntentJs.suiteError(sig.get("alg"), sig.containsKey("alg"));
+                if (se != null) return "sig.alg: " + se;
+                if (!isStr(sig.get("kid"), 128)) return "sig.kid must be a non-empty string";
+                if (!IntentJs.b64any(sig.get("value"))) return "sig.value is not canonical base64url";
+                if (sig.containsKey("pq_value") && !IntentJs.b64any(sig.get("pq_value"))) return "sig.pq_value is not canonical base64url";
+            } else if (doc.containsKey("sig")) return "an unsigned schema must not carry sig";
             IntentJs.canonBytes(body(doc));
             return null;
         } catch (RuntimeException e) {
@@ -243,6 +360,76 @@ public final class ActionSchema {
         return null;
     }
 
+    private static boolean isTwo(Object v) { Double d = IntentJs.num(v); return d != null && d == 2.0; }
+
+    // ---- v2 string formats (syntactic checks, identical in every language; none consults a registry or the network) ----
+    private static final String JS_WS = "\\t\\n\\u000B\\f\\r \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"; // the ECMAScript \s class
+    private static final Pattern EMAIL_RE = Pattern.compile("[A-Za-z0-9._%+\\-]{1,64}@[A-Za-z0-9\\-]{1,63}(?:\\.[A-Za-z0-9\\-]{1,63})+");
+    private static final Pattern URL_RE = Pattern.compile("[A-Za-z][A-Za-z0-9+.\\-]{0,31}://[^" + JS_WS + "/?#]+[^" + JS_WS + "]*");
+    private static final Pattern HTTPS_RE = Pattern.compile("https://[^" + JS_WS + "/?#]+[^" + JS_WS + "]*");
+    private static final Pattern UUID_RE = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    private static final Pattern IBAN_RE = Pattern.compile("[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}");
+    private static final Pattern PHONE_RE = Pattern.compile("\\+[1-9][0-9]{6,14}");
+    private static final Pattern CIDR4_RE = Pattern.compile("([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})/([0-9]{1,2})");
+    private static final Pattern CIDR6_RE = Pattern.compile("([0-9a-fA-F:]{2,39})/([0-9]{1,3})");
+    private static final Pattern COUNTRY_RE = Pattern.compile("[A-Z]{2}");
+    private static final Pattern CURRENCY_RE = Pattern.compile("[A-Z]{3}");
+    private static final Pattern SEMVER_RE = Pattern.compile("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z\\-]+(?:\\.[0-9A-Za-z\\-]+)*)?(?:\\+[0-9A-Za-z\\-]+(?:\\.[0-9A-Za-z\\-]+)*)?");
+    private static final Pattern SHA256_RE = Pattern.compile("[0-9a-f]{64}");
+    private static final Pattern ID_FORMAT_RE = Pattern.compile("id:[a-z0-9_]+(?:\\.[a-z0-9_]+){0,3}");
+    private static final Pattern ID_VALUE_RE = Pattern.compile("[A-Za-z0-9._:\\-]{1,128}");
+    private static final Pattern DATETIME_RE = Pattern.compile("([0-9]{4}-[0-9]{2}-[0-9]{2})T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])(?:\\.[0-9]{1,3})?Z");
+
+    private static boolean canonDec(String n) { return String.valueOf(Integer.parseInt(n)).equals(n); }
+
+    private static boolean ibanOk(String s) {
+        if (!IBAN_RE.matcher(s).matches()) return false;
+        int rem = 0;
+        String r = s.substring(4) + s.substring(0, 4);
+        for (int i = 0; i < r.length(); i++) {
+            char ch = r.charAt(i);
+            int v = ch >= 'A' ? ch - 55 : ch - 48;
+            rem = (v > 9 ? rem * 100 + v : rem * 10 + v) % 97;
+        }
+        return rem == 1;
+    }
+
+    private static boolean cidrOk(String s) {
+        Matcher m = CIDR4_RE.matcher(s);
+        if (m.matches()) {
+            for (int i = 1; i <= 4; i++) if (Integer.parseInt(m.group(i)) > 255 || !canonDec(m.group(i))) return false;
+            return Integer.parseInt(m.group(5)) <= 32 && canonDec(m.group(5));
+        }
+        m = CIDR6_RE.matcher(s);
+        if (!m.matches()) return false;
+        long colons = m.group(1).chars().filter(c -> c == ':').count();
+        return colons >= 2 && !m.group(1).contains(":::") && Integer.parseInt(m.group(2)) <= 128 && canonDec(m.group(2));
+    }
+
+    /** The checker of a v2 {@code format}, or null when the format is unknown. {@code id:<type>} accepts a 1..128 character safe id. */
+    static java.util.function.Predicate<String> formatCheck(String f) {
+        switch (f) {
+            case "email": return s -> s.length() <= 254 && EMAIL_RE.matcher(s).matches();
+            case "url": return s -> URL_RE.matcher(s).matches();
+            case "uri_https": return s -> HTTPS_RE.matcher(s).matches();
+            case "uuid": return s -> UUID_RE.matcher(s).matches();
+            case "iban": return ActionSchema::ibanOk;
+            case "phone_e164": return s -> PHONE_RE.matcher(s).matches();
+            case "cidr": return ActionSchema::cidrOk;
+            case "iso_country": return s -> COUNTRY_RE.matcher(s).matches();
+            case "iso_currency": return s -> CURRENCY_RE.matcher(s).matches();
+            case "semver": return s -> SEMVER_RE.matcher(s).matches();
+            case "sha256": return s -> SHA256_RE.matcher(s).matches();
+            default: return ID_FORMAT_RE.matcher(f).matches() ? s -> ID_VALUE_RE.matcher(s).matches() : null;
+        }
+    }
+
+    private static String[] formatViolation(Map<String, Object> d, String x) {
+        if (!d.containsKey("format")) return null;
+        java.util.function.Predicate<String> ck = d.get("format") instanceof String ? formatCheck((String) d.get("format")) : null;
+        return ck == null || !ck.test(x) ? new String[] {"out_of_domain", "not a valid " + d.get("format")} : null;
+    }
+
     private static boolean isCalendarDate(String s) {
         Matcher m = DATE_RE.matcher(s);
         if (!m.matches()) return false;
@@ -267,7 +454,24 @@ public final class ActionSchema {
                 if (!(x instanceof String) || Json.hasLoneSurrogate((String) x)) return new String[] {"bad_type", "expected a string"};
                 if (IntentJs.u8len((String) x) > maxLen) return new String[] {"out_of_domain", "longer than the declared max_len"};
                 if (d.containsKey("values") && !((List<?>) d.get("values")).contains(x)) return new String[] {"out_of_domain", "not one of the declared values"};
+                return formatViolation(d, (String) x);
+            case "object_ref":
+                if (!(x instanceof String) || Json.hasLoneSurrogate((String) x) || ((String) x).isEmpty()) return new String[] {"bad_type", "expected a non-empty id string"};
+                if (IntentJs.u8len((String) x) > maxLen) return new String[] {"out_of_domain", "longer than the declared max_len"};
+                return formatViolation(d, (String) x);
+            case "datetime": {
+                if (!(x instanceof String)) return new String[] {"bad_type", "expected an RFC 3339 UTC string"};
+                Matcher m = DATETIME_RE.matcher((String) x);
+                return m.matches() && isCalendarDate(m.group(1)) ? null : new String[] {"out_of_domain", "not an RFC 3339 UTC datetime YYYY-MM-DDTHH:MM:SS[.fff]Z"};
+            }
+            case "duration": {
+                if (!IntentJs.isInt(x)) return new String[] {"bad_type", "expected a safe integer (milliseconds)"};
+                double v = IntentJs.num(x);
+                if (v < 0) return new String[] {"out_of_domain", "a duration is not negative"};
+                if (d.containsKey("min") && v < IntentJs.num(d.get("min"))) return new String[] {"out_of_domain", "below min"};
+                if (d.containsKey("max") && v > IntentJs.num(d.get("max"))) return new String[] {"out_of_domain", "above max"};
                 return null;
+            }
             case "integer": {
                 if (!IntentJs.isInt(x)) return new String[] {"bad_type", "expected a safe integer"};
                 double v = IntentJs.num(x);
