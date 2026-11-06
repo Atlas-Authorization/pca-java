@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * non-JSON whitespace, duplicate keys (after unescaping), lone surrogates (raw or escaped), raw control characters
  * in strings, unknown escapes, nesting deeper than {@link #MAX_DEPTH}, input longer than {@link #MAX_CHARS}
  * UTF-8 bytes, and any number not in the canonical wire form (see {@link #numberError}).
- * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files): it has no depth cap.
+ * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files): it has no fixed depth cap; a document that overflows the stack is refused like any other.
  */
 public final class Json {
     private Json() {}
@@ -114,7 +114,13 @@ public final class Json {
     public static Object parse(String s) { return new Parser(s, true).top(); }
 
     /** Lenient RFC 8259 (fixtures only): duplicate keys / lone surrogates / any number allowed. */
-    public static Object parseLenient(String s) { return new Parser(s, false).top(); }
+    public static Object parseLenient(String s) {
+        try {
+            return new Parser(s, false).top();
+        } catch (StackOverflowError e) { // no fixed cap (JSON.parse has none), but a deep document is an ordinary refusal for every caller
+            throw new IllegalArgumentException("JSON nesting too deep");
+        }
+    }
 
     private static boolean dig(char c) { return c >= '0' && c <= '9'; }
 
@@ -333,7 +339,27 @@ public final class Json {
         }
         if (Double.isInfinite(f) || Double.isNaN(f)) throw new IllegalArgumentException("canonicalize: non-finite number");
         if (f == 0) return "0";
-        return new BigDecimal(Double.toString(f)).stripTrailingZeros().toPlainString();
+        BigDecimal a = shortest(Math.abs(f));
+        return (f < 0 ? a.negate() : a).toPlainString();
+    }
+
+    /**
+     * The shortest decimal that reads back as {@code a} (finite, &gt; 0); among equally short ones the closest to its exact value,
+     * a tie to the even last digit (ECMA-262 Number::toString). Double.toString is not shortest before JDK 19.
+     */
+    static BigDecimal shortest(double a) {
+        BigDecimal x = new BigDecimal(a);
+        for (int p = 1; ; p++) {
+            BigDecimal lo = x.round(new java.math.MathContext(p, java.math.RoundingMode.FLOOR));
+            BigDecimal hi = x.round(new java.math.MathContext(p, java.math.RoundingMode.CEILING));
+            boolean okLo = lo.doubleValue() == a, okHi = hi.doubleValue() == a;
+            if (okLo && okHi) {
+                int c = hi.subtract(x).compareTo(x.subtract(lo));
+                return (c < 0 || c == 0 && !hi.unscaledValue().testBit(0) ? hi : lo).stripTrailingZeros();
+            }
+            if (okLo) return lo.stripTrailingZeros();
+            if (okHi) return hi.stripTrailingZeros();
+        }
     }
 
     @SuppressWarnings("unchecked")
