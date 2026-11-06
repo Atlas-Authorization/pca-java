@@ -59,10 +59,10 @@ public final class Pq {
     public static final String UNSUPPORTED_SUITE = "unsupported_suite";
 
     /** The closed TS suite registry ({@code SIG_SUITES} in pq.ts), in registry order. */
-    public static final List<String> REGISTERED_SUITES = List.of(
+    public static final List<String> REGISTERED_SUITES = NullSafe.list(List.of(
         "ed25519", "ml-dsa-65", "hybrid-ed25519-ml-dsa-65", "hybrid-nested-ed25519-ml-dsa-65", "slh-dsa-sha2-128f",
         "hybrid-ed25519-slh-dsa-sha2-128f", "ml-dsa-87", "hybrid-ed25519-ml-dsa-87", "slh-dsa-sha2-256s",
-        "hybrid-ed25519-slh-dsa-sha2-256s", "fn-dsa-512", "fn-dsa-1024", "less-cat1", "hybrid-ed25519-less-cat1");
+        "hybrid-ed25519-slh-dsa-sha2-256s", "fn-dsa-512", "fn-dsa-1024", "less-cat1", "hybrid-ed25519-less-cat1"));
 
     /** The post-quantum primitive of a suite, with its (public key, signature) byte lengths. */
     public enum Prim {

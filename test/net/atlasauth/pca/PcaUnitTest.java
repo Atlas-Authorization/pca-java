@@ -774,14 +774,14 @@ public class PcaUnitTest {
         Pca.Verdict g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD);
         assertTrue(g.allow);
         assertEquals("", g.reason);
-        assertEquals(List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter"), new ArrayList<>(g.checks.keySet()));
+        assertEquals(List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format"), new ArrayList<>(g.checks.keySet()));
         g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, AUD);
         assertTrue(g.allow);
         g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, null);
         assertFalse(g.allow);
         assertEquals("audience: aud does not match this resource server / instance", g.reason);
         assertEquals(Boolean.FALSE, g.checks.get("audience"));
-        assertEquals(Boolean.TRUE, g.checks.get("counter"));
+        assertEquals(Boolean.TRUE, g.checks.get("counter_format"));
         assertEquals(Boolean.TRUE, g.checks.get("leaf_signature"));
         g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, "other");
         assertEquals("audience: aud does not match this resource server / instance", g.reason);
@@ -821,10 +821,10 @@ public class PcaUnitTest {
         p = (Map<String, Object>) Json.parse(raw);
         p.put("counter", n("-1"));
         g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
-        assertEquals(Boolean.FALSE, g.checks.get("counter"));
+        assertEquals(Boolean.FALSE, g.checks.get("counter_format"));
         assertEquals("leaf_signature: signature does not verify under the leaf holder key", g.reason);
         p.put("counter", n("0"));
-        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD).checks.get("counter"));
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD).checks.get("counter_format"));
         // chain: empty / too long / caveat limit / root mismatch
         p = (Map<String, Object>) Json.parse(raw);
         p.put("cap_chain", new ArrayList<>());
@@ -832,7 +832,7 @@ public class PcaUnitTest {
         assertEquals("chain: empty chain", g.reason);
         assertEquals("false|false|false|true", g.checks.get("chain") + "|" + g.checks.get("grant_ref_bound") + "|" + g.checks.get("leaf_signature") + "|" + !g.allow);
         assertEquals(Boolean.TRUE, g.checks.get("plan_inclusion"));
-        assertEquals(Boolean.TRUE, g.checks.get("counter"));
+        assertEquals(Boolean.TRUE, g.checks.get("counter_format"));
         p = (Map<String, Object>) Json.parse(raw);
         List<Object> ch17 = new ArrayList<>();
         for (int i = 0; i < 17; i++) ch17.add(l(p.get("cap_chain")).get(0));
@@ -864,7 +864,7 @@ public class PcaUnitTest {
         assertEquals(Boolean.TRUE, g.checks.get("wire"));
         assertEquals(Boolean.TRUE, g.checks.get("version"));
         assertEquals(Boolean.FALSE, g.checks.get("chain"));
-        assertEquals(Boolean.FALSE, g.checks.get("counter"));
+        assertEquals(Boolean.FALSE, g.checks.get("counter_format"));
         assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
         // reason is not overwritten by the catch when something already failed
         p = (Map<String, Object>) Json.parse(raw);
@@ -1194,7 +1194,7 @@ public class PcaUnitTest {
 
     @SuppressWarnings("unchecked")
     @Test void intentVerify() throws Exception {
-        List<String> base = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter");
+        List<String> base = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format");
         String raw = (String) vec("valid-raw-json-format-insensitive").get("pcactn_json");
         // absent policy / inactive policy: the pre-M2 verdict exactly
         Pca.Verdict g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, null);
@@ -1239,8 +1239,8 @@ public class PcaUnitTest {
     static final String I_NONE = "this verifier requires an intent binding but the PCActn carries none";
     static final String I_NOENV = "the root grant carries no envelope goal commitment to bind the intent to";
     static final String I_OPEN = "intent ref / map_digest / goal_salt do not open the root grant's goal commitment";
-    static final List<String> BASE_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter");
-    static final List<String> INTENT_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter", "intent");
+    static final List<String> BASE_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format");
+    static final List<String> INTENT_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format", "intent");
 
     static Map<String, Object> slotWith(String k, Object v) { Map<String, Object> i = intentSlot(); i.put(k, v); return i; }
     static Map<String, Object> envelope(Object goalCommit) { return map("type", "envelope", "goal_commit", goalCommit); }

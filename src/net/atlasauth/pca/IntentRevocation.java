@@ -183,7 +183,7 @@ public final class IntentRevocation {
     }
 
     /** The parameters of {@code primitives.intent_revocation}; every other input member belongs to the (closed) evidence. */
-    static final List<String> PRIMITIVE_PARAMS = List.of("session", "scope", "authority", "ids", "now", "max_age_ms", "last");
+    static final List<String> PRIMITIVE_PARAMS = NullSafe.list(List.of("session", "scope", "authority", "ids", "now", "max_age_ms", "last"));
 
     /**
      * The {@code primitives.intent_revocation} entry point: {@code {epoch, revoked, session, authority, ids, now, max_age_ms,
