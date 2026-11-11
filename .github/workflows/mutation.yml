@@ -21,6 +21,14 @@ on:
         description: 'run id whose pit-history-<k> artifacts seed a targeted run (default: newest earlier run on this branch)'
         required: false
         default: ''
+      only:
+        description: 'Experiment: run only these shards (comma-separated); the merge stays red'
+        type: string
+        default: ''
+      oom_control:
+        description: 'Negative control (with only=18): only K05OomControlTest runs, and a mutant it catches dies of a real OutOfMemoryError. It must score a run error, never a kill.'
+        type: boolean
+        default: false
       full:
         description: 'ignore any baseline history: mutate everything'
         type: boolean
@@ -39,35 +47,174 @@ concurrency:
 
 env:
   CRATE: java-pca
-  SHARDS: '8'
+  SHARDS: '124'
   P: net.atlasauth.pca
+  # Maven Central answers HTTP 429 when many shards start together: wait and retry instead of losing the shard
+  MAVEN_ARGS: -Daether.transport.http.retryHandler.count=8 -Daether.transport.http.retryHandler.interval=15000
 
 jobs:
   shard:
-    name: shard ${{ matrix.shard }}/8 (${{ matrix.classes }})
+    name: shard ${{ matrix.shard }}/124 (${{ matrix.label }})
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 355
     strategy:
       fail-fast: false
+      max-parallel: 64 # Enterprise plan: 500 concurrent jobs org-wide; 9 lanes x 64 stays under it with room for CI and merge jobs
       matrix:
         include:
-          - { shard: 1, classes: 'Pca' }
-          - { shard: 2, classes: 'Pca$*' }
-          - { shard: 3, classes: 'Json*,Threshold*' }
-          - { shard: 4, classes: 'Pq*,Caveats*' }
-          - { shard: 5, classes: 'IntentV2*,IntentAcc*' }
-          - { shard: 6, classes: 'IntentMap*,IntentSession*,IntentRevocation*,IntentJs*,IntentClassifier*,IntentWB*,IntentArtifacts*' }
-          - { shard: 7, classes: 'SafeRegex*,Predicates*' }
-          - { shard: 8, classes: 'rest' }
+          # generated from .github/scripts/mutation-plan.json (one shard per slice, the number is the 1-based position); label is for the job name only
+          - { shard: 1, label: 'ArgProvenance.verifyChain' }
+          - { shard: 2, label: 'Json.ser' }
+          - { shard: 3, label: 'Json$Parser.number' }
+          - { shard: 4, label: 'Json$Parser.object' }
+          - { shard: 5, label: 'Json.numberError' }
+          - { shard: 6, label: 'Pca.decodeB64uStrict' }
+          - { shard: 7, label: 'Pca.validateWireV2' }
+          - { shard: 8, label: 'ArgProvenance.decide' }
+          - { shard: 9, label: 'IntentV2.modelRules' }
+          - { shard: 10, label: 'Json.jsString' }
+          - { shard: 11, label: 'IntentV2.decide' }
+          - { shard: 12, label: 'Actions.closure+12' }
+          - { shard: 13, label: 'ParamProvenance+3' }
+          - { shard: 14, label: 'Actions$Profile+6' }
+          - { shard: 15, label: 'ProvenanceGate+4' }
+          - { shard: 16, label: 'IntentRevocation+2' }
+          - { shard: 17, label: 'OracleFacts.decide' }
+          - { shard: 18, label: 'K3+3' }
+          - { shard: 19, label: 'AttestIntel.bad+8' }
+          - { shard: 20, label: 'SafeRegex+2' }
+          - { shard: 21, label: 'AttestNvidia+5' }
+          - { shard: 22, label: 'ActionRegistry.M+12' }
+          - { shard: 23, label: 'Mesh.verify' }
+          - { shard: 24, label: 'Pq+2' }
+          - { shard: 25, label: 'AttestXml$Node+18' }
+          - { shard: 26, label: 'Pca.allocationsError+4' }
+          - { shard: 27, label: 'Authorize.decisive+4' }
+          - { shard: 28, label: 'Agent+3' }
+          - { shard: 29, label: 'ActionSchema.accumulationParams+11' }
+          - { shard: 30, label: 'Decision+3' }
+          - { shard: 31, label: 'Sigstore.verifySigstoreBundleCore' }
+          - { shard: 32, label: 'PolicyAuthoring+4' }
+          - { shard: 33, label: 'IntentHistory+7' }
+          - { shard: 34, label: 'Actions.attestRefusal+6' }
+          - { shard: 35, label: 'Predicates.narrowestUnmet+2' }
+          - { shard: 36, label: 'Pca.badPointEncoding+10' }
+          - { shard: 37, label: 'CaveatLang+1' }
+          - { shard: 38, label: 'PlanRegistry+11' }
+          - { shard: 39, label: 'AttestIntelCollateral+2' }
+          - { shard: 40, label: 'AttestNvidiaOcsp+3' }
+          - { shard: 41, label: 'Actions.normalize' }
+          - { shard: 42, label: 'ActionSchema.canonDec+6' }
+          - { shard: 43, label: 'Pca.asStr+3' }
+          - { shard: 44, label: 'IntentClassifier+5' }
+          - { shard: 45, label: 'IntentAcc.accSelects+6' }
+          - { shard: 46, label: 'Issue.attenuate+5' }
+          - { shard: 47, label: 'IntentMap.cellError+10' }
+          - { shard: 48, label: 'Predicates.conditionInner+7' }
+          - { shard: 49, label: 'ArgProvenance.obj+2' }
+          - { shard: 50, label: 'Workflow.evaluate+7' }
+          - { shard: 51, label: 'AttestCommon.asFinite+13' }
+          - { shard: 52, label: 'IntentV2.active+8' }
+          - { shard: 53, label: 'IntentV2.accStep+5' }
+          - { shard: 54, label: 'IntentSession.caveatError+5' }
+          - { shard: 55, label: 'IntentJs.arr+10' }
+          - { shard: 56, label: 'AttestCert.certSigOkBy+3' }
+          - { shard: 57, label: 'AttestCert.algId+8' }
+          - { shard: 58, label: 'IntentJs.isFinite+3' }
+          - { shard: 59, label: 'IntentJs.isNonNeg+6' }
+          - { shard: 60, label: 'AttestDer.derValidAtF+3' }
+          - { shard: 61, label: 'ArgProvenance.actionDigest+4' }
+          - { shard: 62, label: 'AttestDer.checkChainRoles+3' }
+          - { shard: 63, label: 'ArgProvenance.actionInfoError+11' }
+          - { shard: 64, label: 'Json.dig+3' }
+          - { shard: 65, label: 'IntentArtifacts.actionParams+15' }
+          - { shard: 66, label: 'IntentJs.canon+5' }
+          - { shard: 67, label: 'Json$Parser.err+1' }
+          - { shard: 68, label: 'Json$Parser.top+1' }
+          - { shard: 69, label: 'Json$Parser.<init>+2' }
+          - { shard: 70, label: 'SafeRegex$Budget+160' }
+          - { shard: 71, label: 'Pca.approvedGoal+37' }
+          - { shard: 72, label: 'Actions.L+16' }
+          - { shard: 73, label: 'ArgProvenance$Recorder.<init>+9' }
+          - { shard: 74, label: 'Sigstore.arr+39' }
+          - { shard: 75, label: 'AttestDer.allAsciiDigits+8' }
+          - { shard: 76, label: 'ActionSchema.body+18' }
+          - { shard: 77, label: 'Authorize.agentCaveatSatisfied+40' }
+          - { shard: 78, label: 'IntentV2.accCtxError+21' }
+          - { shard: 79, label: 'Predicates.deepEq+21' }
+          - { shard: 80, label: 'Workflow.admitStep+29' }
+          - { shard: 81, label: 'Json$Parser.lit+1' }
+          - { shard: 82, label: 'Issue.checked+28' }
+          - { shard: 83, label: 'IntentJs.b32+11' }
+          - { shard: 84, label: 'AttestCommon.asRec+29' }
+          - { shard: 85, label: 'Json.asDecimal+8' }
+          - { shard: 86, label: 'ArgProvenance$Recorder.forAction+1' }
+          - { shard: 87, label: 'IntentAcc.combineAcc+19' }
+          - { shard: 88, label: 'AttestCert.certKids+4' }
+          - { shard: 89, label: 'IntentSession.b32+6' }
+          - { shard: 90, label: 'IntentMap.closed+14' }
+          - { shard: 91, label: 'ArgProvenance.bundleSession+2' }
+          - { shard: 92, label: 'IntentArtifacts.iterable' }
+          - { shard: 93, label: 'rest (every class not named above: Pq$Suite today)' }
+          - { shard: 94, label: 'Actions.A+18' }
+          - { shard: 95, label: 'Actions.bindingsError+16' }
+          - { shard: 96, label: 'Actions.M+16' }
+          - { shard: 97, label: 'AttestIntel.<init>+10' }
+          - { shard: 98, label: 'GoalSemantics.applies+22' }
+          - { shard: 99, label: 'GoalSemantics.exceeded+4' }
+          - { shard: 100, label: 'Authorize$Input+1' }
+          - { shard: 101, label: 'OracleFacts.claim+6' }
+          - { shard: 102, label: 'OracleFacts.decideIntentWorld+5' }
+          - { shard: 103, label: 'OracleFacts.actionParams+5' }
+          - { shard: 104, label: 'Keys$SuiteKey+1' }
+          - { shard: 105, label: 'Actions.validateDef' }
+          - { shard: 106, label: 'Actions.paramError' }
+          - { shard: 107, label: 'Actions.sensitivityFloor' }
+          - { shard: 108, label: 'Actions.isFormat+1' }
+          - { shard: 109, label: 'Mesh.checkCosignedHead+10' }
+          - { shard: 110, label: 'Mesh.bindRevRoot+11' }
+          - { shard: 111, label: 'Mesh.admits+11' }
+          - { shard: 112, label: 'IntentV2$Decision+2' }
+          - { shard: 113, label: 'Sigstore.verifySct' }
+          - { shard: 114, label: 'Sigstore.verifyRfc3161' }
+          - { shard: 115, label: 'Sigstore.parseCert' }
+          - { shard: 116, label: 'Sigstore.pinnedLog+1' }
+          - { shard: 117, label: 'ActionRegistry.A+12' }
+          - { shard: 118, label: 'ActionRegistry.actionPinError+9' }
+          - { shard: 119, label: 'Passport.verifyUnchecked' }
+          - { shard: 120, label: 'Passport.eq+4' }
+          - { shard: 121, label: 'AttestNvidiaRim$Hook+1' }
+          - { shard: 122, label: 'GoalSemantics.inWindow+5' }
+          - { shard: 123, label: 'GoalSemantics.commit+6' }
+          - { shard: 124, label: 'GoalSemantics.canon+5' }
     steps:
+      - name: Shard filter
+        if: ${{ inputs.only != '' }}
+        env:
+          ONLY: ${{ inputs.only }}
+        run: case ",$ONLY," in *,${{ matrix.shard }},*) ;; *) echo "::notice::not in this experiment"; exit 1 ;; esac
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
+        id: jdk
+        continue-on-error: true  # a transient download failure must not leave the later steps on the runner's default JDK
         with:
           distribution: temurin
           # 23, not 21: LESS runs through the FFM API (JDK 22+). On 21 LessNative never loaded, so its mutants and every
           # LESS branch of Pq/Pca were NO_COVERAGE or survived untested (ci.yml runs the same build on 23 with --less)
           java-version: '23'
           cache: maven
+      - name: JDK again from another vendor when the first setup failed
+        if: steps.jdk.outcome == 'failure'
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '23'
+          cache: maven
+      - name: The job runs on the expected JDK
+        shell: bash
+        run: |
+          java -version 2>&1
+          java -version 2>&1 | grep -q 'version "'23 || { echo "::error::the expected JDK is not the active JDK"; exit 1; }
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -96,52 +243,181 @@ jobs:
             fi
           done
           echo "::notice::shard $SHARD: no baseline PIT history found, full run (seeds the history for the next run)"
+      - name: Re-measure dead mutants (targeted mode)
+        if: ${{ !inputs.full && env.PIT_HISTORY_IN != '' }}
+        # PIT may reuse a carried TIMED_OUT / MEMORY_ERROR / RUN_ERROR result when the class and its covering tests look unchanged,
+        # so a new deadline test would never re-measure it. Every history record is one serialized mutant result (base64, one per
+        # line): drop the records whose status is one of those three, so PIT has no previous result and runs the mutant again.
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          p = os.environ["PIT_HISTORY_IN"]
+          keep, drop = [], 0
+          for ln in open(p):
+              t = ln.strip()
+              if not t:
+                  continue
+              b = base64.b64decode(t + "=" * (-len(t) % 4))
+              if b"TIMED_OUT" in b or b"MEMORY_ERROR" in b or b"RUN_ERROR" in b:
+                  drop += 1
+              else:
+                  keep.append(ln if ln.endswith("\n") else ln + "\n")
+          open(p, "w").writelines(keep)
+          print(f"targeted: dropped {drop} dead-minion history record(s), kept {len(keep)}")
+          PY
       - name: Mutate
         working-directory: ${{ env.MONO }}/sdks/java-pca
         env:
-          CLASSES: ${{ matrix.classes }}
+          SHARD: ${{ matrix.shard }}
+          ONLY: ${{ inputs.only }}
           JDK_JAVA_OPTIONS: --enable-native-access=ALL-UNNAMED
+          PCA_OOM_CONTROL: ${{ inputs.oom_control && '1' || '' }}
         run: |
           # the shard's class set replaces the pom's targetClasses (an explicit pom setting wins over -DtargetClasses)
           python3 - <<'PY'
-          import os, re
-          p, c = os.environ["P"], os.environ["CLASSES"]
-          shards = ["Pca", "Pca$*", "Json*,Threshold*", "Pq*,Caveats*", "IntentV2*,IntentAcc*",
-                    "IntentMap*,IntentSession*,IntentRevocation*,IntentJs*,IntentClassifier*,IntentWB*,IntentArtifacts*",
-                    "SafeRegex*,Predicates*"]
-          par = lambda xs: "".join(f"<param>{p}.{x}</param>" for x in xs)
-          if c == "rest":
-              block = f"<targetClasses><param>{p}.*</param></targetClasses><excludedClasses>{par(','.join(shards).split(','))}</excludedClasses>"
+          import json, os, re
+          plan = json.load(open(os.path.join(os.environ["GITHUB_WORKSPACE"], ".github/scripts/mutation-plan.json")))
+          p = plan["package"]
+          sl = plan["slices"][int(os.environ["SHARD"]) - 1]
+          xml = lambda g: g.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+          par = lambda xs: "".join(f"<param>{xml(p + '.' + x)}</param>" for x in xs)
+          if sl.get("rest"):
+              named = sorted({c for q in plan["slices"] for c in q.get("classes", [])})
+              block = f"<targetClasses><param>{p}.*</param></targetClasses><excludedClasses>{par(named)}</excludedClasses>"
           else:
-              block = f"<targetClasses>{par(c.split(','))}</targetClasses>"
+              block = f"<targetClasses>{par(sl['classes'])}</targetClasses>"
+              if sl.get("exclude_methods"):
+                  block += "<excludedMethods>" + "".join(f"<param>{xml(g)}</param>" for g in sl["exclude_methods"]) + "</excludedMethods>"
           s = open("pom.xml").read()
+          assert "<excludedMethods>" not in s, "the pom already sets excludedMethods"
           s2 = re.sub(r"<targetClasses>.*?</targetClasses>", lambda m: block, s, count=1, flags=re.S)
           assert s2 != s, "targetClasses not found in pom.xml"
+          if os.environ.get("PCA_OOM_CONTROL") == "1":
+              s2, n = re.subn(r"<targetTests>.*?</targetTests>", f"<targetTests><param>{p}.K05OomControlTest</param></targetTests>", s2, count=1, flags=re.S)
+              assert n == 1, "targetTests not found in pom.xml"
           open("pom.xml", "w").write(s2)
-          print(block)
+          print(sl.get("label"), "-", len(block), "chars of target block")
           PY
+          # the minions' real heap and every GC, kept in the PIT log below
+          sed -i 's#<arg>-Xss8m</arg>#<arg>-Xss8m</arg><arg>-Xlog:gc,gc+init:stdout</arg>#' pom.xml
+          # cheaper minion JVMs (one JVM per mutant makes the start-up the cost): C1 only, one GC thread per JVM (four JVMs share four CPUs; G1 stays, because PIT's
+          # memory watchdog reads the G1 old-gen pool and the serial collector would shrink it), and an AppCDS archive of the
+          # classes every minion loads. None of them changes what a test computes. The archive is made once, by a one-minion PIT run over a
+          # 4-mutant class with the archive created at exit (threads 1: no two JVMs write it); the real run only maps it (no AutoCreate), and
+          # the flag is added only if the archive exists.
           mvn -B -ntp -q test-compile
+          python3 - <<'PY'
+          import re
+          s = open("pom.xml").read()
+          t = re.sub(r"<targetClasses>.*?</targetClasses>", "<targetClasses><param>net.atlasauth.pca.A2a$ReceiptChain</param></targetClasses>", s, count=1, flags=re.S)
+          t = t.replace("<arg>-Xss8m</arg>", "<arg>-Xss8m</arg><arg>-XX:+AutoCreateSharedArchive</arg><arg>-XX:SharedArchiveFile=/tmp/pca-app.jsa</arg>", 1)
+          open("pom-prime.xml", "w").write(t)
+          PY
+          rm -f /tmp/pca-app.jsa
+          mvn -B -ntp -f pom-prime.xml org.pitest:pitest-maven:mutationCoverage -Dthreads=1 -DmutationUnitSize=1 -DtimestampedReports=false -DreportsDirectory="$RUNNER_TEMP/pit-prime" > "$RUNNER_TEMP/pit-prime.log" 2>&1 || true
+          rm -f pom-prime.xml
+          CDS=""; if [ -s /tmp/pca-app.jsa ]; then CDS="<arg>-XX:SharedArchiveFile=/tmp/pca-app.jsa</arg><arg>-Xshare:auto</arg>"; echo "AppCDS archive: $(stat -c %s /tmp/pca-app.jsa) bytes"; else echo "::warning::no AppCDS archive was created (the minions start without it)"; fi
+          sed -i "s#<arg>-Xss8m</arg>#<arg>-Xss8m</arg><arg>-XX:TieredStopAtLevel=1</arg><arg>-XX:ParallelGCThreads=1</arg><arg>-XX:ConcGCThreads=1</arg>$CDS#" pom.xml
+          # negative control: the JVM flag really ends a process on OutOfMemoryError with the line the Report step counts
+          printf 'class Oom { public static void main(String[] a) { System.out.println(new long[Integer.MAX_VALUE - 8].length); } }' > "$RUNNER_TEMP/Oom.java"
+          if java -XX:+ExitOnOutOfMemoryError -Xmx64m "$RUNNER_TEMP/Oom.java" > "$RUNNER_TEMP/oom.out" 2>&1; then echo "::error::the out-of-memory control did not exit"; exit 1; fi
+          grep -q 'Terminating due to java.lang.OutOfMemoryError' "$RUNNER_TEMP/oom.out" || { cat "$RUNNER_TEMP/oom.out"; echo "::error::the out-of-memory control printed no termination line"; exit 1; }
+          mvn -B -ntp -q test-compile
+          # -DmutationUnitSize=1: every mutant gets its own minion JVM. PIT otherwise keeps one JVM per class group and applies one mutant after
+          # another in it, so a test class whose static initialiser (or a static cache) first runs under a mutant stores that mutant's
+          # result or its failure for every later mutant, and tests that read it fail for a reason that has nothing to do with them
+          # (a false KILLED). The test sources hold ~75 such static fields that call main code, 10 static blocks and a parsed-fixture
+          # cache; a fresh JVM per mutant removes the whole class without touching them (and without the heap carried between mutants).
           hist=(-DhistoryOutputFile="$RUNNER_TEMP/pit-history-out/pit-history.txt")
           mkdir -p "$RUNNER_TEMP/pit-history-out"
           [ -n "${PIT_HISTORY_IN:-}" ] && hist+=(-DhistoryInputFile="$PIT_HISTORY_IN")
-          mvn -B -ntp org.pitest:pitest-maven:mutationCoverage -Dthreads=4 -DtimestampedReports=false "${hist[@]}" | tail -40
+          PIT_T0=$(date +%s)
+          mvn -B -ntp org.pitest:pitest-maven:mutationCoverage -Dthreads=4 -DmutationUnitSize=1 -DtimestampedReports=false -Dverbose=true "${hist[@]}" 2>&1 | tee "$RUNNER_TEMP/pit.log" | tail -40
+          PIT_T1=$(date +%s)
+          MUTS=$(grep -aoE 'Generated [0-9]+ mutations' "$RUNNER_TEMP/pit.log" | tail -1 | grep -oE '[0-9]+' || echo 0)
+          EXP=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['GITHUB_WORKSPACE'],'.github/scripts/mutation-plan.json')))['slices'][int(os.environ['SHARD'])-1]['mutants'])")
+          echo "plan check: ${MUTS:-0} mutants generated, ${EXP} expected from the plan (the PIT histories of run 42472119807)"
+          echo "pass 1 wall time: $((PIT_T1-PIT_T0)) s for ${MUTS:-0} mutants: $(awk -v t=$((PIT_T1-PIT_T0)) -v m=${MUTS:-1} 'BEGIN{printf "%.1f", t/(m>0?m:1)}') s per mutant (wall, 4 threads)"
+          # proof that -DmutationUnitSize=1 took effect: one JVM per mutant, so the JVM starts (one 'Heap Max Capacity' line each) are about the mutant count
+          echo "minion JVMs started in pass 1: $(grep -ac 'Heap Max Capacity' "$RUNNER_TEMP/pit.log"); $(grep -aoE 'Generated [0-9]+ mutations' "$RUNNER_TEMP/pit.log" | tail -1)"
+          # Second pass (behaviour-preserving mutants die of GC pauses and heap pressure, not of their own doing): every mutant that
+          # ended TIMED_OUT / MEMORY_ERROR / RUN_ERROR is measured once more on its own, alone, at twice the time limit and twice
+          # the heap. Its history record is dropped, so PIT has no previous result and runs only those mutants; everything else is
+          # carried from the first pass. Only the second pass counts: a mutant that is dead again needs a proof in the merge.
+          X1="$(find target/pit-reports -name mutations.xml | head -1)"
+          DEAD="$(grep -cE 'status=.(TIMED_OUT|MEMORY_ERROR|RUN_ERROR)' "$X1" || true)"
+          if [ "${DEAD:-0}" -gt 0 ] && [ -s "$RUNNER_TEMP/pit-history-out/pit-history.txt" ]; then
+            echo "second pass: re-measuring $DEAD dead mutant(s) at twice the limit and a 5 GB heap, two JVMs at a time"
+            cp "$RUNNER_TEMP/pit.log" "$RUNNER_TEMP/pit-pass1.log"
+            python3 - <<'PY'
+          import base64, os
+          p = os.path.join(os.environ["RUNNER_TEMP"], "pit-history-out", "pit-history.txt")
+          keep = []
+          for ln in open(p):
+              t = ln.strip()
+              if not t:
+                  continue
+              b = base64.b64decode(t + "=" * (-len(t) % 4))
+              if not (b"TIMED_OUT" in b or b"MEMORY_ERROR" in b or b"RUN_ERROR" in b):
+                  keep.append(t + "\n")
+          open(os.path.join(os.environ["RUNNER_TEMP"], "pit-history-pass2-in.txt"), "w").writelines(keep)
+          PY
+            sed -i 's#<timeoutFactor>3.0</timeoutFactor>#<timeoutFactor>6.0</timeoutFactor>#; s#<timeoutConstant>15000</timeoutConstant>#<timeoutConstant>30000</timeoutConstant>#; s#<arg>-Xmx3g</arg>#<arg>-Xmx5g</arg>#' pom.xml
+            mvn -B -ntp org.pitest:pitest-maven:mutationCoverage -Dthreads=2 -DmutationUnitSize=1 -DtimestampedReports=false -Dverbose=true \
+              -DhistoryInputFile="$RUNNER_TEMP/pit-history-pass2-in.txt" -DhistoryOutputFile="$RUNNER_TEMP/pit-history-out/pit-history.txt" 2>&1 | tee "$RUNNER_TEMP/pit.log" | tail -40
+          fi
+          # PIT's watchdog exits a minion at 90% of ANY pool (heap, code cache, ...) and reports MEMORY_ERROR with no real OutOfMemoryError: name the pools
+          grep -oE '[A-Za-z0-9 _'"'"'-]+ has exceeded the shutdown threshold' "$RUNNER_TEMP/pit.log" | sort | uniq -c || true
+          grep -aoE 'Heap Max Capacity: [^ ]+' "$RUNNER_TEMP/pit.log" | sort | uniq -c || true
+          grep -aoE '[0-9]+M->[0-9]+M\([0-9]+M\)' "$RUNNER_TEMP/pit.log" | sed -E 's/.*\(([0-9]+)M\)/\1/' | sort -n | tail -1 | sed 's/^/largest heap capacity in a GC line (MB): /' || true
+      - name: Keep the PIT log, GC lines included
+        if: ${{ always() }}
+        run: if [ -f "$RUNNER_TEMP/pit.log" ]; then gzip -c "$RUNNER_TEMP/pit.log" > pit-log-${{ matrix.shard }}.gz; fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: pit-log-${{ matrix.shard }}
+          path: pit-log-${{ matrix.shard }}.gz
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Report
         run: |
+          # a minion killed by -XX:+ExitOnOutOfMemoryError logs this line; the merge compares the count with the shard's RUN_ERROR mutants
+          OOM="$(grep -ac 'Terminating due to java.lang.OutOfMemoryError' "$RUNNER_TEMP/pit.log" || true)"
+          echo "OutOfMemoryError exits: $OOM"
+          echo "{\"count\":${OOM:-0}}" > oom-${{ matrix.shard }}.json
           X="$(find "$MONO/sdks/java-pca/target/pit-reports" -name mutations.xml | head -1)"
-          [ -n "$X" ] || { echo "::error::no mutations.xml"; exit 1; }
+          if [ -z "$X" ]; then
+            # PIT writes no report for a slice without mutants: fine only when the plan expects none (the catch-all rest shard); any other shard without a report is an error
+            EXPR=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['GITHUB_WORKSPACE'],'.github/scripts/mutation-plan.json')))['slices'][${{ matrix.shard }}-1]['mutants'])")
+            if [ "$EXPR" = "0" ] && grep -aq 'Generated 0 mutations' "$RUNNER_TEMP/pit.log"; then mkdir -p "$RUNNER_TEMP/empty-report"; printf '<?xml version="1.0" encoding="UTF-8"?>\n<mutations>\n</mutations>\n' > "$RUNNER_TEMP/empty-report/mutations.xml"; X="$RUNNER_TEMP/empty-report/mutations.xml"; echo "empty slice: no mutants expected, none generated"
+            else echo "::error::no mutations.xml"; exit 1; fi
+          fi
           node "$MONO/tools/pca-audit/native-mutation/pit-convert.mjs" "$CRATE" "$X" results.json survivors-raw.json
           node -e '
             const fs = require("fs"); const r = JSON.parse(fs.readFileSync("results.json", "utf8"));
             const counts = {}; for (const m of r) counts[m.st] = (counts[m.st] || 0) + 1;
             const s = JSON.parse(fs.readFileSync("survivors-raw.json", "utf8")).map(({ status, ...x }) => x);
             fs.writeFileSync("counts.json", JSON.stringify(counts)); fs.writeFileSync("survivors.json", JSON.stringify(s));
+            // detected without a failing test (the minion died or hung): listed for audit, so none passes unseen
+            const odd = r.filter((m) => ["MEMORY_ERROR", "RUN_ERROR", "TIMED_OUT", "NON_VIABLE"].includes(m.st));
+            fs.writeFileSync("errs-${{ matrix.shard }}.json", JSON.stringify(odd));
+            // killed by a failing test: lets the merge tell a borderline hang that a test decided this run from a stale confirmation
+            fs.writeFileSync("killed-${{ matrix.shard }}.json", JSON.stringify(r.filter((m) => m.st === "KILLED")));
+            fs.writeFileSync("files-${{ matrix.shard }}.json", JSON.stringify([...new Set(r.map((m) => m.file))]));
+            if (odd.length) console.log(`::warning::shard ${{ matrix.shard }}: ${odd.length} mutant(s) ended without a failing test: ${JSON.stringify(counts)}`);
           '
           node .github/scripts/mutation-shard-report.mjs --crate="$CRATE" --shard=${{ matrix.shard }} --of="$SHARDS" --tool=pitest \
             --counts=counts.json --survivors=survivors.json --out=shard-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         with:
           name: shard-${{ matrix.shard }}
-          path: shard-${{ matrix.shard }}.json
+          path: |
+            shard-${{ matrix.shard }}.json
+            errs-${{ matrix.shard }}.json
+            oom-${{ matrix.shard }}.json
+            files-${{ matrix.shard }}.json
+            killed-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         with:
           name: pit-history-${{ matrix.shard }}
@@ -168,6 +444,78 @@ jobs:
         run: >
           node .github/scripts/mutation-merge.mjs --crate="$CRATE" --shards="$SHARDS" --reports=reports
           --checker="$MONO/tools/pca-audit" --src="$GITHUB_WORKSPACE"
+      - name: No mutant decided by a dead minion
+        if: always()
+        # MEMORY_ERROR / RUN_ERROR / TIMED_OUT: the minion died or hung, no test decided the mutant, and PIT still counts it detected. Each one fails
+        # the gate unless mutation-memory-confirmed.json confirms it as the mutant's own doing (e.g. a mutated loop bound that
+        # allocates or loops without limit), with a proof that the same tests pass on the unmutated code within the same heap.
+        run: |
+          node -e '
+            const fs = require("fs"), path = require("path");
+            const n = Number(process.env.SHARDS), errs = [];
+            for (let k = 1; k <= n; k++) {
+              const f = `reports/shard-${k}/errs-${k}.json`;
+              if (!fs.existsSync(f)) { console.log(`::error::${f} missing: shard ${k} did not report its dead-minion list`); process.exitCode = 1; continue; }
+              errs.push(...JSON.parse(fs.readFileSync(f, "utf8")).filter((m) => m.st === "MEMORY_ERROR" || m.st === "RUN_ERROR" || m.st === "TIMED_OUT"));
+            }
+            const src = {}; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) walk(q); else (src[e.name] ||= []).push(q); } }; walk("src");
+            const text = (m) => { const fs2 = src[m.file] || []; if (fs2.length !== 1) throw new Error(`${m.file}: ${fs2.length} source files`); return (fs.readFileSync(fs2[0], "utf8").split("\n")[m.line - 1] || "").trim(); };
+            const key = (o) => [o.file, o.method, o.mutant, o.line].join("\0");
+            const conf = fs.existsSync("mutation-memory-confirmed.json") ? JSON.parse(fs.readFileSync("mutation-memory-confirmed.json", "utf8")) : [];
+            for (const c of conf) if (!c.proof || String(c.proof).length < 40) { console.log(`::error::confirmed entry without a proof: ${key(c)}`); process.exitCode = 1; }
+            const ok = new Set(conf.map(key)), used = new Set(), open = [];
+            for (const m of errs) {
+              const k = key({ file: m.file, method: m.method, mutant: `${m.mut}: ${m.desc}`, line: text(m) });
+              if (ok.has(k)) used.add(k); else open.push(`${m.st} ${m.file}:${m.line} ${m.method} ${m.mut}: ${m.desc}`);
+            }
+            // a confirmed hang that a failing test killed this run is decided either way (it flips between TIMED_OUT and KILLED run to run):
+            // a notice, not stale. Not dead and not killed (survived, no coverage, gone) is still stale.
+            const killed = new Set();
+            for (let k = 1; k <= n; k++) { const f = `reports/shard-${k}/killed-${k}.json`; if (fs.existsSync(f)) for (const m of JSON.parse(fs.readFileSync(f, "utf8"))) { try { killed.add(key({ file: m.file, method: m.method, mutant: `${m.mut}: ${m.desc}`, line: text(m) })); } catch {} } }
+            for (const c of conf) if (!used.has(key(c))) {
+              if (killed.has(key(c))) console.log(`::notice::confirmed dead minion was killed by a test this run: ${key(c)}`);
+              else { console.log(`::error::stale confirmed entry (no such dead minion this run): ${key(c)}`); process.exitCode = 1; }
+            }
+            // every OutOfMemoryError exit must be a RUN_ERROR mutant (which then needs its proof above); more exits than RUN_ERRORs means a kill or the baseline hid one
+            const oomOpen = (exits, runErrors) => exits > runErrors;
+            if (!oomOpen(1, 0) || oomOpen(0, 0) || oomOpen(1, 1)) { console.log("::error::the out-of-memory gate failed its control"); process.exitCode = 1; }
+            for (let k = 1; k <= n; k++) {
+              const f = `reports/shard-${k}/oom-${k}.json`;
+              if (!fs.existsSync(f)) { console.log(`::error::${f} missing: shard ${k} did not report its out-of-memory exits`); process.exitCode = 1; continue; }
+              const exits = JSON.parse(fs.readFileSync(f, "utf8")).count;
+              const re = JSON.parse(fs.readFileSync(`reports/shard-${k}/errs-${k}.json`, "utf8")).filter((m) => m.st === "RUN_ERROR").length;
+              console.log(`shard ${k}: ${exits} out-of-memory exit(s), ${re} RUN_ERROR`);
+              if (oomOpen(exits, re)) { console.log(`::error::shard ${k}: ${exits} out-of-memory exit(s) but ${re} RUN_ERROR mutant(s): some were not tied to a mutant`); process.exitCode = 1; }
+            }
+            if (open.length) { console.log(`::error::${open.length} mutant(s) ended in MEMORY_ERROR/RUN_ERROR/TIMED_OUT, decided by no test:`); console.log(open.slice(0, 200).join("\n")); process.exitCode = 1; }
+            else console.log(`dead-minion gate: ${errs.length} MEMORY_ERROR/RUN_ERROR/TIMED_OUT, all confirmed`);
+          '
+      - name: Every shipped source file was mutated
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs"), path = require("path");
+            // only interface declarations (and AttestException: a constructor that only calls super): no bytecode PIT can mutate. A file here that gets mutants, or a new file without any, fails.
+            const NO_CODE = ["AtomicKv.java", "AttestException.java", "GrantResolver.java", "LastStore.java", "SecretStore.java", "VendorImpl.java"];
+            const problems = (src, mutated, none) => [
+              ...src.filter((f) => !mutated.includes(f) && !none.includes(f)).map((f) => `${f}: no mutant in any shard`),
+              ...none.filter((f) => mutated.includes(f) || !src.includes(f)).map((f) => `${f}: listed as having no code, but it has mutants or is gone`),
+            ];
+            const c = (s, m, n) => problems(s, m, n).length;
+            if (c(["a"], ["a"], []) !== 0 || c(["a", "b"], ["a"], []) !== 1 || c(["a", "b"], ["a"], ["b"]) !== 0 || c(["a"], ["a"], ["a"]) !== 1 || c(["a"], ["a"], ["z"]) !== 1) { console.log("::error::the source-file guard failed its control"); process.exit(1); }
+            const src = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) walk(q); else if (q.endsWith(".java")) src.push(e.name); } }; walk("src");
+            if (new Set(src).size !== src.length) { console.log("::error::two source files share a name: the guard compares file names"); process.exitCode = 1; }
+            const mutated = []; const n = Number(process.env.SHARDS);
+            for (let k = 1; k <= n; k++) {
+              const f = `reports/shard-${k}/files-${k}.json`;
+              if (!fs.existsSync(f)) { console.log(`::error::${f} missing: shard ${k} did not report its files`); process.exitCode = 1; continue; }
+              mutated.push(...JSON.parse(fs.readFileSync(f, "utf8")));
+            }
+            const bad = problems(src, mutated, NO_CODE);
+            for (const b of bad) console.log(`::error::${b}`);
+            if (bad.length) process.exitCode = 1;
+            console.log(`source-file guard: ${src.length} files under src (recursive), ${new Set(mutated).size} with mutants, ${NO_CODE.length} with no code`);
+          '
       - uses: actions/upload-artifact@v4
         if: always()
         with:

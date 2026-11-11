@@ -206,7 +206,7 @@ public class ConformanceTest {
             case "threshold_share": return Threshold.verifyShareEntry(in);
             case "pcactn_json": {
                 Map<String, Object> i = (Map<String, Object>) in;
-                return Pca.verifyPcactnJson((String) i.get("text"), (Map<String, Object>) i.get("grant"), Json.asLong(i.get("now")), (String) i.get("aud")).allow;
+                return Pca.verifyPcactnJson((String) i.get("text"), (Map<String, Object>) i.get("grant"), Json.asLong(i.get("now")), (String) i.get("aud"), null, null, null, null, Pca.PlanRoots.SKIP).allow;
             }
             case "json_parse":
                 try { Json.parse((String) ((Map<String, Object>) in).get("text")); return true; } catch (IllegalArgumentException e) { return false; }
@@ -274,7 +274,7 @@ public class ConformanceTest {
                 if (v.get("pcactn") instanceof Map) {
                     Map<String, Object> uctx = (Map<String, Object>) v.get("context");
                     Pca.Verdict ug = Pca.verifyPcactn(v.get("pcactn"), (Map<String, Object>) v.get("grant"), Json.asLong(uctx.get("now")),
-                        (String) uctx.get("aud"), null, null, null);
+                        (String) uctx.get("aud"), null, null, null, null, Pca.PlanRoots.SKIP);
                     check(!ug.allow && ug.reason.contains(Pq.UNSUPPORTED_SUITE), v.get("name") + ": suite " + unsupported
                         + " is not implemented, so it must fail with unsupported_suite (" + ug.reason + ")");
                 }
@@ -297,8 +297,8 @@ public class ConformanceTest {
             // Intent Layer v2: `schema-*` / `session-*` / `acc-*` / `layers-*` vectors carry the verifier state in context.intent_v2.
             IntentV2.Context intentV2 = (ctx.containsKey("intent_v2") ? IntentV2.Context.fromJson(ctx.get("intent_v2")) : null);
             Pca.Verdict got = v.containsKey("pcactn_json")
-                ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud, allowedSuites, intentPolicy, intentV2)
-                : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud, allowedSuites, intentPolicy, intentV2);
+                ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), grant, now, aud, allowedSuites, intentPolicy, intentV2, null, Pca.PlanRoots.SKIP)
+                : Pca.verifyPcactn(v.get("pcactn"), grant, now, aud, allowedSuites, intentPolicy, intentV2, null, Pca.PlanRoots.SKIP);
             Map<String, Object> exp = (Map<String, Object>) v.get("expect");
             // Intent Layer v2: a vector whose v2 artifacts need a suite this verifier lacks must FAIL closed with unsupported_suite
             String missingSuite = missingRequiredSuite(v.get("requires_suite"));
@@ -476,7 +476,7 @@ public class ConformanceTest {
                     case "threshold_share": accepted = Threshold.verifyShareEntry(in); break;
                     case "pcactn_json": {
                         Map<String, Object> i = (Map<String, Object>) in;
-                        accepted = Pca.verifyPcactnJson((String) i.get("text"), (Map<String, Object>) i.get("grant"), Json.asLong(i.get("now")), (String) i.get("aud")).allow;
+                        accepted = Pca.verifyPcactnJson((String) i.get("text"), (Map<String, Object>) i.get("grant"), Json.asLong(i.get("now")), (String) i.get("aud"), null, null, null, null, Pca.PlanRoots.SKIP).allow;
                         break;
                     }
                     default: accepted = true;

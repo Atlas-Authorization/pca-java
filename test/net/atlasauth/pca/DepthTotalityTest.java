@@ -158,12 +158,12 @@ public class DepthTotalityTest {
         Map<String, Object> p = PcaUnitTest.valid();
         Map<String, Object> g = new LinkedHashMap<>(PcaUnitTest.validGrant());
         g.put("zz", nested(100000));
-        Pca.Verdict v = Pca.verifyPcactn(p, g, 0L, "x");
+        Pca.Verdict v = Pca.verifyPcactn(p, g, 0L, "x", null, null, null, null, Pca.PlanRoots.SKIP);
         assertFalse(v.allow);
         // a 100000-deep PCActn object built by a host parser: a terminal wire refusal
         Map<String, Object> deep = new LinkedHashMap<>(p);
         deep.put("risk_claim", map("r", 0, "inputs", map("x", nested(100000))));
-        Pca.Verdict w = Pca.verifyPcactn(deep, PcaUnitTest.validGrant(), 0L, "x");
+        Pca.Verdict w = Pca.verifyPcactn(deep, PcaUnitTest.validGrant(), 0L, "x", null, null, null, null, Pca.PlanRoots.SKIP);
         assertFalse(w.allow);
         assertFalse(w.checks.get("wire"));
         });
@@ -171,7 +171,7 @@ public class DepthTotalityTest {
 
     @Test void pcactnJsonIsTotalOnNullText() {
         // R6-05: a null document is a terminal wire refusal (TS strictParse: 'input is not a string'), never a NullPointerException
-        Pca.Verdict v = Pca.verifyPcactnJson(null, new LinkedHashMap<>(), 0L, "x");
+        Pca.Verdict v = Pca.verifyPcactnJson(null, new LinkedHashMap<>(), 0L, "x", null, null, null, null, Pca.PlanRoots.SKIP);
         assertFalse(v.allow);
         assertFalse(v.checks.get("wire"));
         assertEquals("wire: strict JSON: input is not a string", v.reason);

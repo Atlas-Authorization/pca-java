@@ -561,6 +561,12 @@ public final class SafeRegex {
         }
     }
 
+    /** Regex evaluations refused so far by the open document budget (0 when none is open): the reference's {@code regexRefusals}. */
+    static int refusals() {
+        Budget b = CURRENT.get();
+        return b == null ? 0 : b.refusals;
+    }
+
     /** Charge one evaluation of {@code src} against a subject of {@code subjectLen} code units (chargeRegex). */
     static boolean charge(String src, int subjectLen) {
         Budget b = CURRENT.get();
