@@ -28,9 +28,9 @@ public final class ParamProvenance {
     public static final int MAX_PROV_REFS = 8;
     public static final int MAX_COMMITTED_LABELS = 16;
     static final Pattern PROV_PATH_RE = Pattern.compile("action\\.params\\.[A-Za-z0-9_]{1,64}");
-    private static final Set<String> PROTO_NAMES = Set.of("__proto__", "constructor", "prototype");
-    static final List<String> TAINT_LEVELS = List.of("trusted", "first_party", "tool", "web", "agent");
-    private static final List<String> MODES = List.of("allow", "question", "question_typed", "deny");
+    private static final Set<String> PROTO_NAMES = NullSafe.set(Set.of("__proto__", "constructor", "prototype"));
+    static final List<String> TAINT_LEVELS = NullSafe.list(List.of("trusted", "first_party", "tool", "web", "agent"));
+    private static final List<String> MODES = NullSafe.list(List.of("allow", "question", "question_typed", "deny"));
     private static final int TAINTED_RANK = 2;
 
     /** The rule-17 verdict. {@code labels}: classified path -> level; {@code classes}: path -> sorted class list; {@code env}: nested labels. */

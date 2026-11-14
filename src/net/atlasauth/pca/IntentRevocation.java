@@ -32,7 +32,9 @@ public final class IntentRevocation {
     static String jsText(Object x, boolean present) {
         if (!present) return "undefined";
         if (x == null) return "null";
-        if (x instanceof Json.Num) return ((Json.Num) x).raw.equals("-0") ? "0" : ((Json.Num) x).raw;
+        // JavaScript String(n) of the parsed double: 1e21 and above, and below 1e-6, print in exponent form.
+        if (x instanceof Json.Num) return IntentHistory.jsString(Double.parseDouble(((Json.Num) x).raw));
+        if (x instanceof Number) return IntentHistory.jsString(((Number) x).doubleValue());
         if (x instanceof List || x instanceof Map) return x instanceof List ? listText((List<?>) x) : "[object Object]";
         return String.valueOf(x);
     }
@@ -183,7 +185,7 @@ public final class IntentRevocation {
     }
 
     /** The parameters of {@code primitives.intent_revocation}; every other input member belongs to the (closed) evidence. */
-    static final List<String> PRIMITIVE_PARAMS = List.of("session", "scope", "authority", "ids", "now", "max_age_ms", "last");
+    static final List<String> PRIMITIVE_PARAMS = NullSafe.list(List.of("session", "scope", "authority", "ids", "now", "max_age_ms", "last"));
 
     /**
      * The {@code primitives.intent_revocation} entry point: {@code {epoch, revoked, session, authority, ids, now, max_age_ms,

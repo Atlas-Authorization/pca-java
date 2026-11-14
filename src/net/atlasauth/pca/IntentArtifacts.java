@@ -17,7 +17,7 @@ final class IntentArtifacts {
     static final Pattern INTENT_NAME_RE = Pattern.compile("[a-z][a-z0-9_]{0,63}");
     static final Pattern DATA_CLASS_RE = Pattern.compile("[a-z][a-z0-9_]*(\\.[a-z0-9_]+)*");
     static final Pattern PARAM_SEGMENT_RE = Pattern.compile("[A-Za-z0-9_-]{1,64}");
-    private static final Set<String> FORBIDDEN_SEGMENTS = Set.of("__proto__", "constructor", "prototype");
+    private static final Set<String> FORBIDDEN_SEGMENTS = NullSafe.set(Set.of("__proto__", "constructor", "prototype"));
 
     static boolean isPathSegment(String s) { return PARAM_SEGMENT_RE.matcher(s).matches() && !FORBIDDEN_SEGMENTS.contains(s); }
     static boolean isName(Object v) { return v instanceof String && INTENT_NAME_RE.matcher((String) v).matches(); }
@@ -38,13 +38,13 @@ final class IntentArtifacts {
 
     /** Null when every key is listed and every required key is present, else the reason. */
     static String closedMembers(Map<String, Object> o, List<String> required, List<String> optional, String where) {
-        for (String k : o.keySet()) if (!required.contains(k) && !optional.contains(k)) return "unknown member '" + where + "." + k + "'";
+        for (String k : Decision.jsKeys(o)) if (!required.contains(k) && !optional.contains(k)) return "unknown member '" + where + "." + k + "'";
         for (String k : required) if (!o.containsKey(k)) return "missing member '" + where + "." + k + "'";
         return null;
     }
 
     /** The optional suite members every W-B artifact may carry ({@code alg} and {@code pq_pk} are signed, {@code pq_sig} is not). */
-    static final List<String> SUITE_MEMBERS = List.of("alg", "pq_pk", "pq_sig");
+    static final List<String> SUITE_MEMBERS = NullSafe.list(List.of("alg", "pq_pk", "pq_sig"));
 
     /** A pin entry's optional {@code pq_pk}: absent, or a non-empty string. */
     static boolean pinPqOk(Object pin) {

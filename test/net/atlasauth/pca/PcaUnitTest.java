@@ -771,86 +771,86 @@ public class PcaUnitTest {
     @Test void verifyApi() throws Exception {
         Map<String, Object> vv = vec("valid-raw-json-format-insensitive");
         String raw = (String) vv.get("pcactn_json");
-        Pca.Verdict g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD);
+        Pca.Verdict g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow);
         assertEquals("", g.reason);
-        assertEquals(List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter"), new ArrayList<>(g.checks.keySet()));
-        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, AUD);
+        assertEquals(List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format"), new ArrayList<>(g.checks.keySet()));
+        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow);
-        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, null);
+        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, null, null, null, null, null, Pca.PlanRoots.SKIP);
         assertFalse(g.allow);
         assertEquals("audience: aud does not match this resource server / instance", g.reason);
         assertEquals(Boolean.FALSE, g.checks.get("audience"));
-        assertEquals(Boolean.TRUE, g.checks.get("counter"));
+        assertEquals(Boolean.TRUE, g.checks.get("counter_format"));
         assertEquals(Boolean.TRUE, g.checks.get("leaf_signature"));
-        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, "other");
+        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, "other", null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("audience: aud does not match this resource server / instance", g.reason);
         // wire
-        g = Pca.verifyPcactn("x", validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn("x", validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("wire: PCActn is not an object", g.reason);
         assertEquals(List.of("wire"), new ArrayList<>(g.checks.keySet()).subList(0, 1));
         // text too large
-        g = Pca.verifyPcactnJson(" ".repeat(524289), validGrant(), NOW, AUD);
+        g = Pca.verifyPcactnJson(" ".repeat(524289), validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("wire: artifact exceeds size limit (max 524288 bytes)", g.reason);
-        g = Pca.verifyPcactnJson(raw + " ".repeat(10), validGrant(), NOW, AUD);
+        g = Pca.verifyPcactnJson(raw + " ".repeat(10), validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow);
-        g = Pca.verifyPcactnJson("{", validGrant(), NOW, AUD);
+        g = Pca.verifyPcactnJson("{", validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("wire: strict JSON: expected key at 1", g.reason);
         // version
         Map<String, Object> p = (Map<String, Object>) Json.parse(raw);
         p.put("ver", n("3"));
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("version: unsupported ver (this verifier requires 2)", g.reason);
         // validity boundaries
         p = (Map<String, Object>) Json.parse(raw);
         long iat = 1800000000000L;
         p.put("exp", n("" + iat)); 
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("validity: exp must be greater than iat", g.reason);
         p.put("exp", n("" + (iat + 3600001)));
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("validity: lifetime exceeds 3600000 ms", g.reason);
         p.put("exp", n("" + (iat + 3600000)));
-        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD).checks.get("validity"));
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).checks.get("validity"));
         p.put("exp", n("" + (iat + 600000)));
-        assertEquals("validity: iat is in the future (clock skew)", Pca.verifyPcactn(p, validGrant(), NOW - 60001, AUD).reason);
-        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW - 60000, AUD).checks.get("validity"));
-        assertEquals("validity: the PCActn has expired", Pca.verifyPcactn(p, validGrant(), iat + 600001, AUD).reason);
-        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), iat + 600000, AUD).checks.get("validity"));
+        assertEquals("validity: iat is in the future (clock skew)", Pca.verifyPcactn(p, validGrant(), NOW - 60001, AUD, null, null, null, null, Pca.PlanRoots.SKIP).reason);
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW - 60000, AUD, null, null, null, null, Pca.PlanRoots.SKIP).checks.get("validity"));
+        assertEquals("validity: the PCActn has expired", Pca.verifyPcactn(p, validGrant(), iat + 600001, AUD, null, null, null, null, Pca.PlanRoots.SKIP).reason);
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), iat + 600000, AUD, null, null, null, null, Pca.PlanRoots.SKIP).checks.get("validity"));
         // counter
         p = (Map<String, Object>) Json.parse(raw);
         p.put("counter", n("-1"));
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
-        assertEquals(Boolean.FALSE, g.checks.get("counter"));
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
+        assertEquals(Boolean.FALSE, g.checks.get("counter_format"));
         assertEquals("leaf_signature: signature does not verify under the leaf holder key", g.reason);
         p.put("counter", n("0"));
-        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD).checks.get("counter"));
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).checks.get("counter_format"));
         // chain: empty / too long / caveat limit / root mismatch
         p = (Map<String, Object>) Json.parse(raw);
         p.put("cap_chain", new ArrayList<>());
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("chain: empty chain", g.reason);
         assertEquals("false|false|false|true", g.checks.get("chain") + "|" + g.checks.get("grant_ref_bound") + "|" + g.checks.get("leaf_signature") + "|" + !g.allow);
         assertEquals(Boolean.TRUE, g.checks.get("plan_inclusion"));
-        assertEquals(Boolean.TRUE, g.checks.get("counter"));
+        assertEquals(Boolean.TRUE, g.checks.get("counter_format"));
         p = (Map<String, Object>) Json.parse(raw);
         List<Object> ch17 = new ArrayList<>();
         for (int i = 0; i < 17; i++) ch17.add(l(p.get("cap_chain")).get(0));
         p.put("cap_chain", ch17);
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("chain: chain too long (max 16 hops)", g.reason);
         List<Object> ch16 = new ArrayList<>();
         for (int i = 0; i < 16; i++) ch16.add(l(p.get("cap_chain")).get(0));
         p.put("cap_chain", ch16);
-        assertEquals("chain: hop 1: broken parent link", Pca.verifyPcactn(p, validGrant(), NOW, AUD).reason);
+        assertEquals("chain: hop 1: broken parent link", Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).reason);
         p = (Map<String, Object>) Json.parse(raw);
         List<Object> cvs = new ArrayList<>();
         for (int i = 0; i < 257; i++) cvs.add(map("type", "t"));
         m(l(p.get("cap_chain")).get(0)).put("caveats", cvs);
-        assertEquals("chain: " + Pca.CAVEAT_LIMIT_REASON, Pca.verifyPcactn(p, validGrant(), NOW, AUD).reason);
+        assertEquals("chain: " + Pca.CAVEAT_LIMIT_REASON, Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).reason);
         p = (Map<String, Object>) Json.parse(raw);
         Map<String, Object> g2 = new LinkedHashMap<>(validGrant()); g2.put("holder", B32);
-        assertEquals("chain: chain root is not the grant", Pca.verifyPcactn(p, g2, NOW, AUD).reason);
+        assertEquals("chain: chain root is not the grant", Pca.verifyPcactn(p, g2, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).reason);
         // grant without issuer: expected-issuer check skipped (root signature still verified against the root's own issuer)
         Map<String, Object> g3 = new LinkedHashMap<>(validGrant()); g3.remove("issuer");
         p = (Map<String, Object>) Json.parse(raw);
@@ -858,44 +858,44 @@ public class PcaUnitTest {
         assertEquals("wire", "wire");
         // grant that cannot be canonicalised => caught, all later checks false, reason says malformed
         Map<String, Object> g4 = new LinkedHashMap<>(validGrant()); g4.put("weird", new Object());
-        g = Pca.verifyPcactn(Json.parse(raw), g4, NOW, AUD);
+        g = Pca.verifyPcactn(Json.parse(raw), g4, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.reason.startsWith("malformed PCActn: java.lang.IllegalArgumentException: canonicalize: unsupported type"), g.reason);
         assertFalse(g.allow);
         assertEquals(Boolean.TRUE, g.checks.get("wire"));
         assertEquals(Boolean.TRUE, g.checks.get("version"));
         assertEquals(Boolean.FALSE, g.checks.get("chain"));
-        assertEquals(Boolean.FALSE, g.checks.get("counter"));
+        assertEquals(Boolean.FALSE, g.checks.get("counter_format"));
         assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
         // reason is not overwritten by the catch when something already failed
         p = (Map<String, Object>) Json.parse(raw);
         p.put("ver", n("3"));
-        g = Pca.verifyPcactn(p, g4, NOW, AUD);
+        g = Pca.verifyPcactn(p, g4, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("version: unsupported ver (this verifier requires 2)", g.reason);
         // grant_ref_bound
         p = (Map<String, Object>) Json.parse(raw);
         p.put("grant_ref", B32.replace('q', 'r'));
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals(Boolean.FALSE, g.checks.get("grant_ref_bound"));
         assertEquals("grant_ref_bound: grant_ref is not the id of the root capability in cap_chain", g.reason);
         // plan inclusion + leaf
         p = (Map<String, Object>) Json.parse(raw);
         m(p.get("action")).put("verb", "other");
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("plan_inclusion: action is not a node of the committed plan", g.reason);
         p = (Map<String, Object>) Json.parse(raw);
         m(p.get("plan")).put("node_id", "n2x");
-        assertEquals(Boolean.FALSE, Pca.verifyPcactn(p, validGrant(), NOW, AUD).checks.get("plan_inclusion"));
+        assertEquals(Boolean.FALSE, Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).checks.get("plan_inclusion"));
         p = (Map<String, Object>) Json.parse(raw);
         m(p.get("plan")).remove("conditions_digest"); // the vector's digest IS the default {pre:null,post:null} digest
-        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD).checks.get("plan_inclusion"));
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).checks.get("plan_inclusion"));
         p = (Map<String, Object>) Json.parse(raw);
         p.put("sig", B64);
-        assertEquals("leaf_signature: signature does not verify under the leaf holder key", Pca.verifyPcactn(p, validGrant(), NOW, AUD).reason);
+        assertEquals("leaf_signature: signature does not verify under the leaf holder key", Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).reason);
         // allowed_suites reaches both leaf and hops
-        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, AUD, List.of());
+        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, AUD, List.of(), null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("chain: hop 0: signature suite is not allowed by this verifier's suite policy", g.reason);
         assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
-        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, AUD, List.of("ed25519"));
+        g = Pca.verifyPcactn(Json.parse(raw), validGrant(), NOW, AUD, List.of("ed25519"), null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow);
     }
 
@@ -1194,17 +1194,17 @@ public class PcaUnitTest {
 
     @SuppressWarnings("unchecked")
     @Test void intentVerify() throws Exception {
-        List<String> base = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter");
+        List<String> base = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format");
         String raw = (String) vec("valid-raw-json-format-insensitive").get("pcactn_json");
         // absent policy / inactive policy: the pre-M2 verdict exactly
-        Pca.Verdict g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, null);
+        Pca.Verdict g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow);
         assertEquals(base, new ArrayList<>(g.checks.keySet()));
-        g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, new Pca.IntentPolicy(false, null, null));
+        g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, new Pca.IntentPolicy(false, null, null), null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow);
         assertEquals(base, new ArrayList<>(g.checks.keySet()));
         // active policy, no intent: reported last, fails closed
-        g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, Pca.IntentPolicy.required());
+        g = Pca.verifyPcactnJson(raw, validGrant(), NOW, AUD, null, Pca.IntentPolicy.required(), null, null, Pca.PlanRoots.SKIP);
         assertFalse(g.allow);
         List<String> withIntent = new ArrayList<>(base); withIntent.add("intent");
         assertEquals(withIntent, new ArrayList<>(g.checks.keySet()));
@@ -1213,7 +1213,7 @@ public class PcaUnitTest {
         // carried intent is signed (leaf_signature breaks) and reported even without a policy
         Map<String, Object> p = (Map<String, Object>) Json.parse(raw);
         p.put("intent", intentSlot());
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD);
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals(withIntent, new ArrayList<>(g.checks.keySet()));
         assertEquals(Boolean.TRUE, g.checks.get("wire"));
         assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
@@ -1221,10 +1221,10 @@ public class PcaUnitTest {
         // the binding itself is judged against the verifier's grant argument
         Map<String, Object> bound = new LinkedHashMap<>(validGrant());
         bound.put("caveats", intentGrant(INTENT_COMMIT).get("caveats"));
-        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, bound, NOW, AUD).checks.get("intent"));
+        assertEquals(Boolean.TRUE, Pca.verifyPcactn(p, bound, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).checks.get("intent"));
         // wire: present-but-null is a terminal wire failure
         p.put("intent", null);
-        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, Pca.IntentPolicy.required());
+        g = Pca.verifyPcactn(p, validGrant(), NOW, AUD, null, Pca.IntentPolicy.required(), null, null, Pca.PlanRoots.SKIP);
         assertEquals(List.of("wire"), new ArrayList<>(g.checks.keySet()));
         assertEquals("wire: 'intent' must be an object", g.reason);
     }
@@ -1239,8 +1239,8 @@ public class PcaUnitTest {
     static final String I_NONE = "this verifier requires an intent binding but the PCActn carries none";
     static final String I_NOENV = "the root grant carries no envelope goal commitment to bind the intent to";
     static final String I_OPEN = "intent ref / map_digest / goal_salt do not open the root grant's goal commitment";
-    static final List<String> BASE_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter");
-    static final List<String> INTENT_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter", "intent");
+    static final List<String> BASE_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format");
+    static final List<String> INTENT_KEYS = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format", "intent");
 
     static Map<String, Object> slotWith(String k, Object v) { Map<String, Object> i = intentSlot(); i.put(k, v); return i; }
     static Map<String, Object> envelope(Object goalCommit) { return map("type", "envelope", "goal_commit", goalCommit); }
@@ -1429,41 +1429,41 @@ public class PcaUnitTest {
     @Test void intentKillVerifySigned() throws Exception {
         Map<String, Object> root = intentRoot();
         // baseline: the re-rooted PCActn without intent verifies with the pre-M2 key set
-        Pca.Verdict g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD);
+        Pca.Verdict g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow, g.reason);
         assertEquals(BASE_KEYS, new ArrayList<>(g.checks.keySet()));
-        g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD, null, new Pca.IntentPolicy(false, null, null));
+        g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD, null, new Pca.IntentPolicy(false, null, null), null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow); assertEquals(BASE_KEYS, new ArrayList<>(g.checks.keySet()));
-        g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD, null, new Pca.IntentPolicy(false, 0.0, null));
+        g = Pca.verifyPcactn(signedWithIntent(root, null), root, NOW, AUD, null, new Pca.IntentPolicy(false, 0.0, null), null, null, Pca.PlanRoots.SKIP);
         assertFalse(g.allow); assertEquals(INTENT_KEYS, new ArrayList<>(g.checks.keySet()));
         assertEquals("intent: " + I_NONE, g.reason);
         // bound intent: allow, intent appended exactly after counter
         Map<String, Object> p = signedWithIntent(root, intentSlot());
-        g = Pca.verifyPcactn(p, root, NOW, AUD);
+        g = Pca.verifyPcactn(p, root, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertTrue(g.allow, g.reason);
         assertEquals("", g.reason);
         assertEquals(INTENT_KEYS, new ArrayList<>(g.checks.keySet()));
         assertEquals(Boolean.TRUE, g.checks.get("intent"));
-        assertTrue(Pca.verifyPcactnJson(Json.canonicalizeStrict(p), root, NOW, AUD, null, Pca.IntentPolicy.required()).allow);
+        assertTrue(Pca.verifyPcactnJson(Json.canonicalizeStrict(p), root, NOW, AUD, null, Pca.IntentPolicy.required(), null, null, Pca.PlanRoots.SKIP).allow);
         // thresholds through the verifier: inclusive, one past fails only `intent`
-        assertTrue(Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(true, 950000.0, 4310000.0)).allow);
-        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, 950001.0, null));
+        assertTrue(Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(true, 950000.0, 4310000.0), null, null, Pca.PlanRoots.SKIP).allow);
+        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, 950001.0, null), null, null, Pca.PlanRoots.SKIP);
         assertFalse(g.allow);
         assertEquals("intent: intent fidelity 950000 ppm is below the policy minimum 950001", g.reason);
         for (String k : BASE_KEYS) assertEquals(Boolean.TRUE, g.checks.get(k), k);
-        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, null, 4309999.0));
+        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, null, 4309999.0), null, null, Pca.PlanRoots.SKIP);
         assertFalse(g.allow); assertEquals(Boolean.FALSE, g.checks.get("intent"));
-        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, -1.0, null));
+        g = Pca.verifyPcactn(p, root, NOW, AUD, null, new Pca.IntentPolicy(false, -1.0, null), null, null, Pca.PlanRoots.SKIP);
         assertFalse(g.allow); assertEquals("intent: " + I_MIS, g.reason);
         // range edges, re-signed
         Map<String, Object> edge = intentSlot(); edge.put("fidelity_ppm", n("1000000")); edge.put("residual_risk_ppm", n("0"));
-        assertTrue(Pca.verifyPcactn(signedWithIntent(root, edge), root, NOW, AUD).allow);
+        assertTrue(Pca.verifyPcactn(signedWithIntent(root, edge), root, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).allow);
         edge.put("fidelity_ppm", n("0")); edge.put("residual_risk_ppm", n("9007199254740991"));
-        assertTrue(Pca.verifyPcactn(signedWithIntent(root, edge), root, NOW, AUD).allow);
+        assertTrue(Pca.verifyPcactn(signedWithIntent(root, edge), root, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP).allow);
         // signed: tampering after signing breaks leaf_signature while the binding itself still holds
         Map<String, Object> t = signedWithIntent(root, intentSlot());
         m(t.get("intent")).put("fidelity_ppm", n("999999"));
-        g = Pca.verifyPcactn(t, root, NOW, AUD);
+        g = Pca.verifyPcactn(t, root, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertFalse(g.allow);
         assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
         assertEquals(Boolean.TRUE, g.checks.get("intent"));
@@ -1471,19 +1471,19 @@ public class PcaUnitTest {
         // stripping the signed intent also breaks the signature (and drops the check)
         Map<String, Object> s = signedWithIntent(root, intentSlot());
         s.remove("intent");
-        g = Pca.verifyPcactn(s, root, NOW, AUD);
+        g = Pca.verifyPcactn(s, root, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals(Boolean.FALSE, g.checks.get("leaf_signature"));
         assertEquals(BASE_KEYS, new ArrayList<>(g.checks.keySet()));
         // a grant-binding failure fails only `intent`
         Map<String, Object> salt = signedWithIntent(root, slotWith("goal_salt", "other"));
-        g = Pca.verifyPcactn(salt, root, NOW, AUD);
+        g = Pca.verifyPcactn(salt, root, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals("intent: " + I_OPEN, g.reason);
         for (String k : BASE_KEYS) assertEquals(Boolean.TRUE, g.checks.get(k), k);
         // wire refusals through the verifier are terminal (wire only)
         for (Object bad : new Object[] {null, "x", new ArrayList<>(), slotWith("fidelity_ppm", n("1000001")), slotWith("residual_risk_ppm", n("-1")), slotWith("goal_salt", "é".repeat(64) + "a")}) {
             Map<String, Object> w = signedWithIntent(root, intentSlot());
             w.put("intent", bad);
-            g = Pca.verifyPcactn(w, root, NOW, AUD, null, Pca.IntentPolicy.required());
+            g = Pca.verifyPcactn(w, root, NOW, AUD, null, Pca.IntentPolicy.required(), null, null, Pca.PlanRoots.SKIP);
             assertFalse(g.allow);
             assertEquals(List.of("wire"), new ArrayList<>(g.checks.keySet()), String.valueOf(bad));
             assertTrue(g.reason.startsWith("wire: "), g.reason);
@@ -1523,8 +1523,8 @@ public class PcaUnitTest {
         // and through the signed verifier
         Map<String, Object> root = intentRoot();
         Map<String, Object> p = signedWithIntent(root, intentSlot());
-        assertTrue(Pca.verifyPcactn(p, root, NOW, AUD, null, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.0,\"max_residual_risk_ppm\":4.31e6}")).allow);
-        Pca.Verdict v = Pca.verifyPcactn(p, root, NOW, AUD, null, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.5}"));
+        assertTrue(Pca.verifyPcactn(p, root, NOW, AUD, null, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.0,\"max_residual_risk_ppm\":4.31e6}"), null, null, Pca.PlanRoots.SKIP).allow);
+        Pca.Verdict v = Pca.verifyPcactn(p, root, NOW, AUD, null, Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":950000.5}"), null, null, Pca.PlanRoots.SKIP);
         assertFalse(v.allow);
         assertEquals("intent: " + I_MIS, v.reason);
         assertThrows(RuntimeException.class, () -> Pca.IntentPolicy.fromJsonText("{\"min_fidelity_ppm\":}"));

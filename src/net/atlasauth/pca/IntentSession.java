@@ -30,11 +30,11 @@ public final class IntentSession {
     public static final int MAX_IS_LABELS = 16;
     public static final int MAX_IS_STRING_BYTES = 256;
     public static final int MAX_SESSION_PRINCIPALS = 16;
-    static final List<String> INTENT_SESSION_FIELDS = List.of("session", "root", "seq", "schema", "acc", "facts", "offer_set", "prov", "classes", "labels", "map_form");
+    static final List<String> INTENT_SESSION_FIELDS = NullSafe.list(List.of("session", "root", "seq", "schema", "acc", "facts", "offer_set", "prov", "classes", "labels", "map_form"));
     static final Pattern ACC_ID_RE = Pattern.compile("[A-Za-z0-9_]{1,64}");
     private static final Pattern PROV_KEY_RE = Pattern.compile("action\\.params\\.[A-Za-z0-9_]{1,64}");
-    private static final List<String> ROOT_KEYS = List.of("v", "kind", "session", "principals", "intent_ref", "schema", "layers", "accumulators", "monitors",
-        "question_uri", "revocation", "flows", "expires_at", "signer", "alg", "pq_pk", "sig", "pq_sig");
+    private static final List<String> ROOT_KEYS = NullSafe.list(List.of("v", "kind", "session", "principals", "intent_ref", "schema", "layers", "accumulators", "monitors",
+        "question_uri", "revocation", "flows", "expires_at", "signer", "alg", "pq_pk", "sig", "pq_sig"));
 
     private static boolean b32(Object o) { return IntentJs.b32(o); }
     private static boolean shortStr(Object v) {
@@ -64,7 +64,7 @@ public final class IntentSession {
             for (int i = 0; i < l.size(); i++) {
                 Object a = l.get(i);
                 if (!(a instanceof Map)) return "'intent_session.acc[" + i + "]' must be an object";
-                for (Object k : ((Map<?, ?>) a).keySet()) if (!List.of("id", "post", "receipt").contains(k)) return "unknown field 'intent_session.acc[" + i + "]." + k + "'";
+                for (Object k : ((Map<?, ?>) a).keySet()) if (!NullSafe.list(List.of("id", "post", "receipt")).contains(k)) return "unknown field 'intent_session.acc[" + i + "]." + k + "'";
                 Object id = IntentJs.get(a, "id");
                 if (!(id instanceof String) || !ACC_ID_RE.matcher((String) id).matches()) return "'intent_session.acc[" + i + "].id' must match [A-Za-z0-9_]{1,64}";
                 if (!ids.add((String) id)) return "'intent_session.acc' ids must be distinct";
@@ -109,7 +109,7 @@ public final class IntentSession {
     public static String caveatError(Object cO) {
         if (!(cO instanceof Map) || !INTENT_SESSION_CAVEAT.equals(((Map<?, ?>) cO).get("type"))) return "not an intent_session caveat";
         Map<String, Object> c = IntentJs.obj(cO);
-        for (String k : c.keySet()) if (!List.of("type", "session", "seq", "root", "prev").contains(k)) return "intent_session caveat: unknown member '" + k + "'";
+        for (String k : c.keySet()) if (!NullSafe.list(List.of("type", "session", "seq", "root", "prev")).contains(k)) return "intent_session caveat: unknown member '" + k + "'";
         if (!b32(c.get("session")) || !b32(c.get("root"))) return "intent_session caveat: session and root must be canonical base64url (32 bytes)";
         if (!IntentJs.isNonNeg(c.get("seq")) || IntentJs.num(c.get("seq")) > MAX_SESSION_SEQ) return "intent_session caveat: seq must be a safe integer in [0, 2147483647]";
         if ((IntentJs.num(c.get("seq")) == 0) != !c.containsKey("prev")) return "intent_session caveat: prev is present exactly when seq > 0";
@@ -138,7 +138,7 @@ public final class IntentSession {
             Set<String> keys = new HashSet<>();
             for (Object p : (List<?>) ps) {
                 boolean ok = p instanceof Map && b32(IntentJs.get(p, "key"));
-                if (ok) for (Object k : ((Map<?, ?>) p).keySet()) if (!List.of("key", "alg", "pq_pk").contains(k)) ok = false;
+                if (ok) for (Object k : ((Map<?, ?>) p).keySet()) if (!NullSafe.list(List.of("key", "alg", "pq_pk")).contains(k)) ok = false;
                 if (!ok) return "principals entries are {key, alg?, pq_pk?} with a 32-byte key";
                 String pse = IntentJs.suiteError(IntentJs.get(p, "alg"), IntentJs.own(p, "alg"));
                 if (pse != null) return "principal alg: " + pse;
@@ -150,7 +150,7 @@ public final class IntentSession {
                 return "schema must be {aud, digest}";
             Object L = s.get("layers");
             if (!(L instanceof Map)) return "layers must be an object";
-            for (Object k : ((Map<?, ?>) L).keySet()) if (!List.of("org", "std", "task").contains(k)) return "layers: unknown member '" + k + "'";
+            for (Object k : ((Map<?, ?>) L).keySet()) if (!NullSafe.list(List.of("org", "std", "task")).contains(k)) return "layers: unknown member '" + k + "'";
             Object task = IntentJs.get(L, "task");
             if (!sortedKeysAre(task, "map_digest") || !b32(IntentJs.get(task, "map_digest"))) return "layers.task must be {map_digest}";
             Object org = IntentJs.get(L, "org");
@@ -184,7 +184,7 @@ public final class IntentSession {
             if (s.containsKey("revocation")) {
                 Object r = s.get("revocation");
                 boolean ok = r instanceof Map;
-                if (ok) for (Object k : ((Map<?, ?>) r).keySet()) if (!List.of("epoch_uri", "max_age_s", "key", "pq_pk").contains(k)) ok = false;
+                if (ok) for (Object k : ((Map<?, ?>) r).keySet()) if (!NullSafe.list(List.of("epoch_uri", "max_age_s", "key", "pq_pk")).contains(k)) ok = false;
                 if (!ok) return "revocation must be {epoch_uri, max_age_s, key, pq_pk?}";
                 Object eu = IntentJs.get(r, "epoch_uri");
                 if (!(eu instanceof String) || ((String) eu).isEmpty()) return "revocation.epoch_uri must be a non-empty string";
