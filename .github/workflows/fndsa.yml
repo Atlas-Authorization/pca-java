@@ -1,0 +1,47 @@
+name: FN-DSA
+
+# adapters/pca-fndsa: the real FN-DSA primitive (Pornin's fn-dsa 0.4.0, a draft best guess at FIPS 206) through JNA over libfndsa, built here from the
+# flagship's crate. Runs the 480-case reference corpus (mock backend) and the keyless known-answer replay against the real library.
+on:
+  push:
+    branches: [main, 'ci/**']
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fndsa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout (full shared corpus and the FN-DSA crate from the flagship)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: libfndsa (cargo build --features capi)
+        run: echo "ATLAS_PCA_LIBFNDSA=$(.github/scripts/build-libfndsa.sh "$RUNNER_TEMP/fndsa" "$RUNNER_TEMP/mono/packages/pca-fndsa-wasm/crate" | tail -1)/libfndsa.so" >> "$GITHUB_ENV"
+      - name: Reference corpus replay (480 cases, mock backend)
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp test -Dtest=FndsaDiffTest
+      - name: Core suite dispatch without a backend (deny / unsupported_suite)
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp test -Dtest=FndsaCoreSuiteTest
+      - name: Install the core library
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q install -DskipTests
+      - name: Known-answer replay over libfndsa
+        working-directory: ${{ env.PCA_MONO_SDK }}/adapters/pca-fndsa
+        env:
+          ATLAS_PCA_LIBFNDSA_REQUIRED: '1'
+        run: mvn -B -ntp test # includes NativeFnDsaE2eTest (producer vectors, signed PCActn fixture, no-backend denial)

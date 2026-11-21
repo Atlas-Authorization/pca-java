@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.atlasauth</groupId>
+  <artifactId>pca-openai-java</artifactId>
+  <version>0</version>
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <openai.version>4.30.0</openai.version>
+  </properties>
+  <dependencies>
+    <!-- the PCA Java library, installed into the local Maven repository first; the OpenAI SDK does not need Spring -->
+    <dependency>
+      <groupId>net.atlasauth</groupId><artifactId>pca-mutation</artifactId><version>0</version>
+      <exclusions>
+        <exclusion><groupId>jakarta.servlet</groupId><artifactId>jakarta.servlet-api</artifactId></exclusion>
+        <exclusion><groupId>org.springframework</groupId><artifactId>spring-webmvc</artifactId></exclusion>
+      </exclusions>
+    </dependency>
+    <dependency><groupId>net.atlasauth</groupId><artifactId>pca-ai-core</artifactId><version>0</version></dependency>
+    <!-- the official SDK (4.x line: ChatCompletionMessageToolCall is a function/custom union): ChatCompletionMessageToolCall, ChatCompletionToolMessageParam -->
+    <dependency><groupId>com.openai</groupId><artifactId>openai-java</artifactId><version>${openai.version}</version></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.3</version><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version></plugin>
+      <plugin><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version></plugin>
+    </plugins>
+  </build>
+</project>

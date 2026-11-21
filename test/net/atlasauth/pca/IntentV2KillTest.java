@@ -149,9 +149,9 @@ public class IntentV2KillTest {
         return c;
     }
     static Pca.Verdict verify(Map<String, Object> grant, Map<String, Object> p, Map<String, Object> ctx) {
-        return Pca.verifyPcactn(p, grant, NOW, AUD, null, null, IntentV2.Context.fromJson(ctx));
+        return Pca.verifyPcactn(p, grant, NOW, AUD, null, null, IntentV2.Context.fromJson(ctx), null, Pca.PlanRoots.SKIP);
     }
-    static final List<String> CORE = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter", "intent");
+    static final List<String> CORE = List.of("wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter_format", "intent");
     static List<String> keys(String... extra) { List<String> k = new ArrayList<>(CORE); k.addAll(Arrays.asList(extra)); return k; }
     static List<String> failed(Pca.Verdict v) {
         List<String> f = new ArrayList<>();
@@ -180,7 +180,7 @@ public class IntentV2KillTest {
         Pca.Verdict v = verify(G0, plain, ctx());
         assertEquals(CORE, new ArrayList<>(v.checks.keySet()));
         assertEquals(List.of("intent"), failed(v));
-        Pca.Verdict none = Pca.verifyPcactn(plain, G0, NOW, AUD, null, null, null);
+        Pca.Verdict none = Pca.verifyPcactn(plain, G0, NOW, AUD, null, null, null, null, Pca.PlanRoots.SKIP);
         assertEquals(CORE, new ArrayList<>(none.checks.keySet()));
         // session.require: intent_session reported and failed
         Pca.Verdict req = verify(G0, plain, ctx("policy", map("session", map("require", true))));
@@ -199,7 +199,7 @@ public class IntentV2KillTest {
         // a malformed top-level member fails accumulators too when the PCActn carries intent_session
         assertEquals(List.of("schema", "intent_session", "accumulators"), failed(verify(G0, build(G0, "salt0", MAP0, is0(), params(), REF), ctx("params", null))));
         // a present intent_v2 that is not an object is malformed (never "no context")
-        assertEquals(List.of("intent", "schema", "intent_session"), failed(Pca.verifyPcactn(plain, G0, NOW, AUD, null, null, IntentV2.Context.fromJson(null))));
+        assertEquals(List.of("intent", "schema", "intent_session"), failed(Pca.verifyPcactn(plain, G0, NOW, AUD, null, null, IntentV2.Context.fromJson(null), null, Pca.PlanRoots.SKIP)));
         // closed world: schema runs against the FIRST schema and passes
         Pca.Verdict cw = verify(G0, plain, ctx("policy", map("schema", map("closed_world", true))));
         assertEquals(keys("schema"), new ArrayList<>(cw.checks.keySet()));

@@ -1,0 +1,1628 @@
+{
+ "format": 1,
+ "description": "Stateful sequences with the full reasons list of each step, produced by the TypeScript reference (requirePCA over the atomic in-memory store). Signatures come from public test seeds.",
+ "stateful": [
+  {
+   "name": "rs-caveat-failure-and-no-budget",
+   "description": "A caveat failure with no budget: the budget reason precedes the policy reasons.",
+   "layer": "stateful",
+   "setup": {
+    "audience": "rs-conformance",
+    "grants": [
+     {
+      "id": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+      "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+      "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+      "caveats": [
+       {
+        "agent_binding": {},
+        "caveats": [
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         },
+         {
+          "type": "max_spend",
+          "usd": 10
+         }
+        ],
+        "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "predicates": [
+         {
+          "resource": "db/*",
+          "verb": "read"
+         },
+         {
+          "resource": "db/*",
+          "verb": "write"
+         }
+        ],
+        "risk_policy": {
+         "bMax": 1,
+         "kappa": 1,
+         "lambda": 0.0005,
+         "rho": 0.5,
+         "theta1": 0.25,
+         "theta2": 0.6,
+         "weights": {
+          "alpha": 0.25,
+          "beta": 0.2,
+          "delta": 0.2,
+          "epsilon": 0.1,
+          "gamma": 0.2,
+          "zeta": 0.05
+         }
+        },
+        "type": "envelope"
+       }
+      ],
+      "body_digest": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+      "sig": "nBkTyNqy-5cO-1mNT2v9egCN9x25B1T81u06GVR7rBXPPNVy4fH8GJvqnpwu-1HqVAcWT9XPdZaNGcSqjScwCg"
+     }
+    ],
+    "plan_nodes": [
+     {
+      "id": "n2",
+      "verb": "write",
+      "resource": "db/orders",
+      "params_digest": "TUu-Wcaq0iRCzeGZpqil8DRAX814-1qBwk7ySd4cRfE",
+      "reversibility_class": "reversible"
+     }
+    ],
+    "risk": {
+     "semanticDistance": 0,
+     "reversibility": 1,
+     "blastRadius": 0,
+     "taint": 0,
+     "confidence": 1,
+     "age": 0
+    },
+    "revoked": []
+   },
+   "steps": [
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "TUu-Wcaq0iRCzeGZpqil8DRAX814-1qBwk7ySd4cRfE",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+      "cap_chain": [
+       {
+        "id": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           },
+           {
+            "type": "max_spend",
+            "usd": 10
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+        "sig": "nBkTyNqy-5cO-1mNT2v9egCN9x25B1T81u06GVR7rBXPPNVy4fH8GJvqnpwu-1HqVAcWT9XPdZaNGcSqjScwCg"
+       },
+       {
+        "id": "47N9ikb4MBKJnwPjThsqgAdZYZS-QIHb7Q-EsIsIDYc",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           },
+           {
+            "type": "max_spend",
+            "usd": 10
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "47N9ikb4MBKJnwPjThsqgAdZYZS-QIHb7Q-EsIsIDYc",
+        "sig": "P8zxWh4vLXw3vb_MRfWVoIZ7Ls__-ShzccZD2X9ZQAziQNXbUpQ5ZQNbLvCPWYjhjYg4K18wtn1sWuRnSlivAg",
+        "parent": "h7UijOdrRZ2MLVMjVtN3FC7UQOXPMr1_uRwrHCgIf4w"
+       }
+      ],
+      "plan": {
+       "root": "HNLvqnQylk8QAwbi9zw4YytR1hZI0gOUZrtPDZvz5Lo",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 1,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "f8CBv7G356TFaKtpiEnEHUK9IU-fGUpnMdTB3Sz9Xd5xhYW9Th6Dt0J2eh2QEKcu5VqMDu1GDJwwHwYvalSkBQ"
+     },
+     "params": {
+      "amount": 100
+     },
+     "now": 1800000001000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "policy"
+      ],
+      "reasons": [
+       "budget: no budget supplied — fail-closed default (B=0, DENY-METERED): any machine-only (t<3) action must step-up / recharge",
+       "policy: caveat(s) not satisfied: max_spend"
+      ]
+     }
+    },
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "TUu-Wcaq0iRCzeGZpqil8DRAX814-1qBwk7ySd4cRfE",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+      "cap_chain": [
+       {
+        "id": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           },
+           {
+            "type": "max_spend",
+            "usd": 10
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "Th3PN6yW4EhiaC_EuPD4M8HwH7C4IpjGvBwdxYKmxaE",
+        "sig": "nBkTyNqy-5cO-1mNT2v9egCN9x25B1T81u06GVR7rBXPPNVy4fH8GJvqnpwu-1HqVAcWT9XPdZaNGcSqjScwCg"
+       },
+       {
+        "id": "47N9ikb4MBKJnwPjThsqgAdZYZS-QIHb7Q-EsIsIDYc",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           },
+           {
+            "type": "max_spend",
+            "usd": 10
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "47N9ikb4MBKJnwPjThsqgAdZYZS-QIHb7Q-EsIsIDYc",
+        "sig": "P8zxWh4vLXw3vb_MRfWVoIZ7Ls__-ShzccZD2X9ZQAziQNXbUpQ5ZQNbLvCPWYjhjYg4K18wtn1sWuRnSlivAg",
+        "parent": "h7UijOdrRZ2MLVMjVtN3FC7UQOXPMr1_uRwrHCgIf4w"
+       }
+      ],
+      "plan": {
+       "root": "HNLvqnQylk8QAwbi9zw4YytR1hZI0gOUZrtPDZvz5Lo",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 2,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "48lyt5c0FO8wtbwZOkLVdZGX40q4_RM_Uwe1qwX2ToyUtWCs_CNwicDVqOQZaNwNmN0JowBUiS5YhLrBvqjwAQ"
+     },
+     "params": {
+      "amount": 100
+     },
+     "now": 1800000002000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "policy"
+      ],
+      "reasons": [
+       "budget: no budget supplied — fail-closed default (B=0, DENY-METERED): any machine-only (t<3) action must step-up / recharge",
+       "policy: caveat(s) not satisfied: max_spend"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "rs-missing-inputs-no-budget",
+   "description": "Risk inputs missing and no budget: the budget reason, the missing-inputs reason and the step-up reasons, in order.",
+   "layer": "stateful",
+   "setup": {
+    "audience": "rs-conformance",
+    "grants": [
+     {
+      "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+      "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+      "caveats": [
+       {
+        "agent_binding": {},
+        "caveats": [
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "predicates": [
+         {
+          "resource": "db/*",
+          "verb": "read"
+         },
+         {
+          "resource": "db/*",
+          "verb": "write"
+         }
+        ],
+        "risk_policy": {
+         "bMax": 1,
+         "kappa": 1,
+         "lambda": 0.0005,
+         "rho": 0.5,
+         "theta1": 0.25,
+         "theta2": 0.6,
+         "weights": {
+          "alpha": 0.25,
+          "beta": 0.2,
+          "delta": 0.2,
+          "epsilon": 0.1,
+          "gamma": 0.2,
+          "zeta": 0.05
+         }
+        },
+        "type": "envelope"
+       }
+      ],
+      "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+     }
+    ],
+    "plan_nodes": [
+     {
+      "id": "n2",
+      "verb": "write",
+      "resource": "db/orders",
+      "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+      "reversibility_class": "reversible"
+     }
+    ],
+    "risk": {
+     "taint": 0
+    },
+    "revoked": []
+   },
+   "steps": [
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "cap_chain": [
+       {
+        "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+       },
+       {
+        "id": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "sig": "VCWQYOeYDTgcNzay7TLioYtZeBbpxvLdwKxDUNmAlzMuwMZXLyAGim_johkuXgG7h-8MUCknpira1h_UVIKgAg",
+        "parent": "-UQnF40jhn2zviGK70VkO0YsCevV4W01x47LZUN0lYI"
+       }
+      ],
+      "plan": {
+       "root": "ZXUA-fzNu77W-PDJkJqHmtsutaxaABeNkP6_rQj6YPU",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 1,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "K9W3l4hTuhE78Yslab2nW4Oj9d-ZplRJeMj61r98IInUOpCVUn2PWT29umzRTi3-WGLdfwwOV_xFyhciHrVUCA"
+     },
+     "params": {
+      "id": 1
+     },
+     "now": 1800000001000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "threshold"
+      ],
+      "reasons": [
+       "budget: no budget supplied — fail-closed default (B=0, DENY-METERED): any machine-only (t<3) action must step-up / recharge",
+       "policy: risk input(s) missing, assumed worst case: reversibility, blastRadius, confidence",
+       "policy: trust budget depleted: human recharge required",
+       "threshold: t=3 (strong) required but no threshold verifier is enforced"
+      ]
+     }
+    },
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "cap_chain": [
+       {
+        "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+       },
+       {
+        "id": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "sig": "VCWQYOeYDTgcNzay7TLioYtZeBbpxvLdwKxDUNmAlzMuwMZXLyAGim_johkuXgG7h-8MUCknpira1h_UVIKgAg",
+        "parent": "-UQnF40jhn2zviGK70VkO0YsCevV4W01x47LZUN0lYI"
+       }
+      ],
+      "plan": {
+       "root": "ZXUA-fzNu77W-PDJkJqHmtsutaxaABeNkP6_rQj6YPU",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 2,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "Vsh6D6xJxO8VUe7YXD-VTObxReu8Jr4L2BilmVUwitqV52ft2hbWObJIIl9NJVuQjHnmCAzDoo_hE70bWxKxDQ"
+     },
+     "params": {
+      "id": 1
+     },
+     "now": 1800000002000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "threshold"
+      ],
+      "reasons": [
+       "budget: no budget supplied — fail-closed default (B=0, DENY-METERED): any machine-only (t<3) action must step-up / recharge",
+       "policy: risk input(s) missing, assumed worst case: reversibility, blastRadius, confidence",
+       "policy: trust budget depleted: human recharge required",
+       "threshold: t=3 (strong) required but no threshold verifier is enforced"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "rs-step-up-no-budget",
+   "description": "A step-up to t=3 with no budget.",
+   "layer": "stateful",
+   "setup": {
+    "audience": "rs-conformance",
+    "grants": [
+     {
+      "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+      "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+      "caveats": [
+       {
+        "agent_binding": {},
+        "caveats": [
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "predicates": [
+         {
+          "resource": "db/*",
+          "verb": "read"
+         },
+         {
+          "resource": "db/*",
+          "verb": "write"
+         }
+        ],
+        "risk_policy": {
+         "bMax": 1,
+         "kappa": 1,
+         "lambda": 0.0005,
+         "rho": 0.5,
+         "theta1": 0.25,
+         "theta2": 0.6,
+         "weights": {
+          "alpha": 0.25,
+          "beta": 0.2,
+          "delta": 0.2,
+          "epsilon": 0.1,
+          "gamma": 0.2,
+          "zeta": 0.05
+         }
+        },
+        "type": "envelope"
+       }
+      ],
+      "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+     }
+    ],
+    "plan_nodes": [
+     {
+      "id": "n2",
+      "verb": "write",
+      "resource": "db/orders",
+      "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+      "reversibility_class": "reversible"
+     }
+    ],
+    "risk": {
+     "semanticDistance": 1,
+     "reversibility": 1,
+     "blastRadius": 1,
+     "taint": 1,
+     "confidence": 1,
+     "age": 0
+    },
+    "revoked": []
+   },
+   "steps": [
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "cap_chain": [
+       {
+        "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+       },
+       {
+        "id": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "sig": "VCWQYOeYDTgcNzay7TLioYtZeBbpxvLdwKxDUNmAlzMuwMZXLyAGim_johkuXgG7h-8MUCknpira1h_UVIKgAg",
+        "parent": "-UQnF40jhn2zviGK70VkO0YsCevV4W01x47LZUN0lYI"
+       }
+      ],
+      "plan": {
+       "root": "ZXUA-fzNu77W-PDJkJqHmtsutaxaABeNkP6_rQj6YPU",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 1,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "K9W3l4hTuhE78Yslab2nW4Oj9d-ZplRJeMj61r98IInUOpCVUn2PWT29umzRTi3-WGLdfwwOV_xFyhciHrVUCA"
+     },
+     "params": {
+      "id": 1
+     },
+     "now": 1800000001000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "threshold"
+      ],
+      "reasons": [
+       "budget: no budget supplied — fail-closed default (B=0, DENY-METERED): any machine-only (t<3) action must step-up / recharge",
+       "policy: risk 0.650 exceeds auto threshold: step-up to t=3",
+       "threshold: t=3 (strong) required but no threshold verifier is enforced"
+      ]
+     }
+    },
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "cap_chain": [
+       {
+        "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+       },
+       {
+        "id": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "sig": "VCWQYOeYDTgcNzay7TLioYtZeBbpxvLdwKxDUNmAlzMuwMZXLyAGim_johkuXgG7h-8MUCknpira1h_UVIKgAg",
+        "parent": "-UQnF40jhn2zviGK70VkO0YsCevV4W01x47LZUN0lYI"
+       }
+      ],
+      "plan": {
+       "root": "ZXUA-fzNu77W-PDJkJqHmtsutaxaABeNkP6_rQj6YPU",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 2,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "Vsh6D6xJxO8VUe7YXD-VTObxReu8Jr4L2BilmVUwitqV52ft2hbWObJIIl9NJVuQjHnmCAzDoo_hE70bWxKxDQ"
+     },
+     "params": {
+      "id": 1
+     },
+     "now": 1800000002000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "threshold"
+      ],
+      "reasons": [
+       "budget: no budget supplied — fail-closed default (B=0, DENY-METERED): any machine-only (t<3) action must step-up / recharge",
+       "policy: risk 0.650 exceeds auto threshold: step-up to t=3",
+       "threshold: t=3 (strong) required but no threshold verifier is enforced"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "rs-missing-inputs-with-budget",
+   "description": "Risk inputs missing with a budget that covers the cost of nothing: the missing-inputs reason and the step-up reasons.",
+   "layer": "stateful",
+   "setup": {
+    "audience": "rs-conformance",
+    "grants": [
+     {
+      "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+      "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+      "caveats": [
+       {
+        "agent_binding": {},
+        "caveats": [
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "predicates": [
+         {
+          "resource": "db/*",
+          "verb": "read"
+         },
+         {
+          "resource": "db/*",
+          "verb": "write"
+         }
+        ],
+        "risk_policy": {
+         "bMax": 1,
+         "kappa": 1,
+         "lambda": 0.0005,
+         "rho": 0.5,
+         "theta1": 0.25,
+         "theta2": 0.6,
+         "weights": {
+          "alpha": 0.25,
+          "beta": 0.2,
+          "delta": 0.2,
+          "epsilon": 0.1,
+          "gamma": 0.2,
+          "zeta": 0.05
+         }
+        },
+        "type": "envelope"
+       }
+      ],
+      "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+     }
+    ],
+    "plan_nodes": [
+     {
+      "id": "n2",
+      "verb": "write",
+      "resource": "db/orders",
+      "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+      "reversibility_class": "reversible"
+     }
+    ],
+    "risk": {
+     "taint": 0
+    },
+    "initial_budget": {
+     "B": 1,
+     "tau": 1800000000000
+    },
+    "revoked": []
+   },
+   "steps": [
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "cap_chain": [
+       {
+        "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+       },
+       {
+        "id": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "sig": "VCWQYOeYDTgcNzay7TLioYtZeBbpxvLdwKxDUNmAlzMuwMZXLyAGim_johkuXgG7h-8MUCknpira1h_UVIKgAg",
+        "parent": "-UQnF40jhn2zviGK70VkO0YsCevV4W01x47LZUN0lYI"
+       }
+      ],
+      "plan": {
+       "root": "ZXUA-fzNu77W-PDJkJqHmtsutaxaABeNkP6_rQj6YPU",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 1,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "K9W3l4hTuhE78Yslab2nW4Oj9d-ZplRJeMj61r98IInUOpCVUn2PWT29umzRTi3-WGLdfwwOV_xFyhciHrVUCA"
+     },
+     "params": {
+      "id": 1
+     },
+     "now": 1800000001000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "threshold"
+      ],
+      "reasons": [
+       "policy: risk input(s) missing, assumed worst case: reversibility, blastRadius, confidence",
+       "policy: risk 0.500 exceeds auto threshold: step-up to t=2",
+       "threshold: t=2 (standard) required but no threshold verifier is enforced"
+      ]
+     }
+    },
+    {
+     "op": "present",
+     "pcactn": {
+      "ver": 2,
+      "action": {
+       "verb": "write",
+       "resource": "db/orders",
+       "params_digest": "A3ySFO73TMOIfzpPCFtOF9digNr9JzsO4WDAnEuhz9Q",
+       "reversibility_class": "reversible"
+      },
+      "grant_ref": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+      "cap_chain": [
+       {
+        "id": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "issuer": "5rV0Nm5L62KuXVKl0xTMFSPBg9E_74ty2ZWIk2g5G_E",
+        "holder": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         }
+        ],
+        "body_digest": "n8DQCvhCUf2ZcrG-UGAwFcGRZGbMPaBVtLxxD4g3X2A",
+        "sig": "-_-TnlFB1wvQU9tNYJJgIyiEpb4At2vUXDHK6VQSmM9UsrVsS96tcfTNu861fFhCEWTPMalqrWEpwOMbLacZDA"
+       },
+       {
+        "id": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "issuer": "ru3oBFp5YsBfzclgdHTDSKKycXeABcfHPA2UibxZLyA",
+        "holder": "wLsVlubO9ttV7dFAs1_3wBHCP3426xVI0JRbtYG0SqM",
+        "caveats": [
+         {
+          "agent_binding": {},
+          "caveats": [
+           {
+            "at": 1800003600000,
+            "type": "expires"
+           }
+          ],
+          "goal_commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "predicates": [
+           {
+            "resource": "db/*",
+            "verb": "read"
+           },
+           {
+            "resource": "db/*",
+            "verb": "write"
+           }
+          ],
+          "risk_policy": {
+           "bMax": 1,
+           "kappa": 1,
+           "lambda": 0.0005,
+           "rho": 0.5,
+           "theta1": 0.25,
+           "theta2": 0.6,
+           "weights": {
+            "alpha": 0.25,
+            "beta": 0.2,
+            "delta": 0.2,
+            "epsilon": 0.1,
+            "gamma": 0.2,
+            "zeta": 0.05
+           }
+          },
+          "type": "envelope"
+         },
+         {
+          "at": 1800003600000,
+          "type": "expires"
+         }
+        ],
+        "body_digest": "95P5M8JsyiQzwXYKeyu_qJXUqEdm_YmcrYJWwt5-iNM",
+        "sig": "VCWQYOeYDTgcNzay7TLioYtZeBbpxvLdwKxDUNmAlzMuwMZXLyAGim_johkuXgG7h-8MUCknpira1h_UVIKgAg",
+        "parent": "-UQnF40jhn2zviGK70VkO0YsCevV4W01x47LZUN0lYI"
+       }
+      ],
+      "plan": {
+       "root": "ZXUA-fzNu77W-PDJkJqHmtsutaxaABeNkP6_rQj6YPU",
+       "inclusion_proof": {
+        "index": 0,
+        "size": 1,
+        "path": []
+       },
+       "node_id": "n2",
+       "conditions_digest": "YM87EgmmvAr4WYQDm1wkrB7pFoHs4esi8tOmv9_DUxY"
+      },
+      "attestation": {
+       "quote_digest": "",
+       "epoch": 0,
+       "model_id": "m",
+       "measurement": "",
+       "operator": "o"
+      },
+      "provenance": {
+       "causal_hash": "",
+       "taint_level": 0,
+       "trusted_refs": []
+      },
+      "freshness": {
+       "beacon_ref": "",
+       "epoch": 0,
+       "accumulator_witness": ""
+      },
+      "counter": 2,
+      "risk_claim": {
+       "r": 0,
+       "inputs": {}
+      },
+      "aud": "rs-conformance",
+      "iat": 1800000000000,
+      "exp": 1800000600000,
+      "sig": "Vsh6D6xJxO8VUe7YXD-VTObxReu8Jr4L2BilmVUwitqV52ft2hbWObJIIl9NJVuQjHnmCAzDoo_hE70bWxKxDQ"
+     },
+     "params": {
+      "id": 1
+     },
+     "now": 1800000002000,
+     "expect": {
+      "allow": false,
+      "failed": [
+       "threshold"
+      ],
+      "reasons": [
+       "policy: risk input(s) missing, assumed worst case: reversibility, blastRadius, confidence",
+       "policy: risk 0.500 exceeds auto threshold: step-up to t=2",
+       "threshold: t=2 (standard) required but no threshold verifier is enforced"
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

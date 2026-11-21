@@ -106,7 +106,7 @@ public final class IntentJs {
         }
         return n;
     }
-    static byte[] utf8(String s) { return s.getBytes(StandardCharsets.UTF_8); }
+    static byte[] utf8(String s) { return Json.utf8(s); }
     static boolean hasLoneSurrogate(String s) { return Json.hasLoneSurrogate(s); }
     public static int compareUtf8(String a, String b) { return Json.compareUtf8(a, b); }
     static List<String> sortedUtf8(java.util.Collection<String> keys) {
@@ -167,7 +167,8 @@ public final class IntentJs {
         if (s == null || s.alg.equals("ed25519")) return base;
         Map<String, Object> out = new LinkedHashMap<>(base);
         out.put("alg", s.alg);
-        if (pqPresent) out.put("pq_pk", pqPk);
+        // the reference assigns pq_pk unconditionally, and an undefined member has no strict canonical form (the signed bytes throw)
+        out.put("pq_pk", pqPresent ? pqPk : new Object());
         return out;
     }
 

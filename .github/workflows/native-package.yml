@@ -1,0 +1,35 @@
+name: Native package
+
+# The ristretto255 / Ed25519 group layer (ratchet, OPRF, FROST, MPC) runs on libsodium through lazysodium-java, whose jar bundles libsodium for Linux (x86-64, arm64),
+# macOS (Intel, Apple silicon) and Windows. This check resolves the pinned lazysodium-java from Maven Central and fails the release if the jar stops carrying any of
+# them, so no consumer needs to install libsodium.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundled-libsodium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout (full shared corpus from the flagship)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - name: The pinned lazysodium-java jar carries libsodium for every desktop platform
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          set -euo pipefail
+          v=$(sed -n 's|.*<artifactId>lazysodium-java</artifactId><version>\([^<]*\)</version>.*|\1|p' pom.xml | head -1)
+          [ -n "$v" ] || { echo "::error::lazysodium-java version not found"; exit 1; }
+          curl -fsSL -o "$RUNNER_TEMP/ls.jar" "https://repo1.maven.org/maven2/com/goterl/lazysodium-java/$v/lazysodium-java-$v.jar"
+          listing="$(unzip -l "$RUNNER_TEMP/ls.jar")"
+          for f in linux64/libsodium.so arm64/libsodium.so mac/libsodium.dylib mac_arm/libsodium.dylib windows64/libsodium.dll; do
+            grep -q " $f\$" <<<"$listing" || { echo "::error::lazysodium-java $v lacks $f"; exit 1; }
+          done
+          echo "lazysodium-java $v bundles libsodium for linux x64/arm64, macOS x64/arm64, windows x64"

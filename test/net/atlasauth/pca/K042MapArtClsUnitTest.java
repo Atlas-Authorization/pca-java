@@ -171,10 +171,10 @@ public class K042MapArtClsUnitTest {
     @Test void classifierTotality() {
         IntentClassifier.ClassResult r = IntentClassifier.decide((Object) "x");
         assertFalse(r.ok);
-        assertEquals("classes: evaluation error (fail closed): ClassCastException", r.reason);
+        assertEquals("classes: input must be an object", r.reason);
         assertNull(r.classes);
         IntentClassifier.ClassResult l = IntentClassifier.decide((Object) list());
-        assertEquals("classes: evaluation error (fail closed): ClassCastException", l.reason);
+        assertEquals("classes: input must be an object", l.reason);
         IntentClassifier.ClassResult ok = IntentClassifier.decide((Object) map("action", map(), "policy", map("classifiers", list())));
         assertTrue(ok.ok);
         assertNull(ok.reason);

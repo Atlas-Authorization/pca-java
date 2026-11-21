@@ -130,11 +130,12 @@ public class JsonPqThresholdUnitTest {
         assertEquals("{\"B\":1,\"a\":2,\"\u00e9\":3,\"\uff5e\":4,\"\ud83d\ude00\":5}", Json.canonicalize(map("\ud83d\ude00", 5, "\uff5e", 4, "\u00e9", 3, "a", 2, "B", 1)));
         assertEquals("\"\\\"\\\\\\b\\f\\n\\r\\t\\u0001\\u001f \u007f\"", Json.canonicalize("\"\\\b\f\n\r\t\u0001\u001f \u007f"));
         assertEquals("\"\u00e9\ud83d\ude00\"", Json.canonicalize("\u00e9\ud83d\ude00"));
-        assertEquals("\"\ufffd\"", Json.canonicalize("\ud83d"));
-        assertEquals("\"\ufffdx\"", Json.canonicalize("\ud83dx"));
-        assertEquals("\"\ufffd\"", Json.canonicalize("\ude00"));
-        assertEquals("\"a\ufffd\"", Json.canonicalize("a\ud83d"));
-        assertEquals("\"\ufffd\ud83d\ude00\"", Json.canonicalize("\ud83d\ud83d\ude00"));
+        // JSON.stringify escapes a lone surrogate
+        assertEquals("\"\\ud83d\"", Json.canonicalize("\ud83d"));
+        assertEquals("\"\\ud83dx\"", Json.canonicalize("\ud83dx"));
+        assertEquals("\"\\ude00\"", Json.canonicalize("\ude00"));
+        assertEquals("\"a\\ud83d\"", Json.canonicalize("a\ud83d"));
+        assertEquals("\"\\ud83d\ud83d\ude00\"", Json.canonicalize("\ud83d\ud83d\ude00"));
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> Json.canonicalizeStrict("\ud83d"));
         assertEquals("canonicalize: lone surrogate in string", e.getMessage());
         e = assertThrows(IllegalArgumentException.class, () -> Json.canonicalizeStrict(map("\ude00", 1)));
@@ -155,10 +156,18 @@ public class JsonPqThresholdUnitTest {
         assertEquals("1", Json.fmtNumber("1"));
         assertEquals("1.5", Json.fmtNumber("1.5"));
         assertEquals("1.5", Json.fmtNumber("1.50"));
+        // shortest round-trip digits on every JDK (JDK 17's Double.toString is not shortest); expected values are V8's / Python's repr
+        String[][] sh = {{"1152921504606846976", "1152921504606847000"}, {"1.2345e21", "1234500000000000000000"},
+            {"5e-324", "5E-324"}, {"5.960464477539063e-8", "5.960464477539063E-8"}, // 2^-24: only the farther candidate reads back
+            {"823201.9974097823", "823201.9974097823"}, {"3819732.2733947793", "3819732.2733947793"}, // both read back: closer wins
+            {"1063416967833914.8", "1063416967833914.8"}, {"983749147814162.2", "983749147814162.2"}, // exact ties: even digit
+            {"190147360152643.12", "190147360152643.12"}, {"0.1", "0.1"}, {"7", "7"}};
+        for (String[] c : sh) assertEquals(new java.math.BigDecimal(c[1]).stripTrailingZeros(), Json.shortest(Double.parseDouble(c[0])), c[0]);
+        assertEquals("-1152921504606847000", Json.fmtNumber("-1152921504606846976"));
         // strict
         assertEquals("[1,1.5]", Json.canonicalizeStrict(new ArrayList<>(List.of(n("1"), n("1.5")))));
         assertEquals("canonicalize: exponent form is not allowed", assertThrows(IllegalArgumentException.class, () -> Json.canonicalizeStrict(n("1e5"))).getMessage());
-        assertEquals("canonicalize: integer outside the safe range", assertThrows(IllegalArgumentException.class, () -> Json.canonicalizeStrict(9007199254740992L)).getMessage());
+        assertEquals("canonicalize: integer outside the safe range (|n| > 2^53-1)", assertThrows(IllegalArgumentException.class, () -> Json.canonicalizeStrict(9007199254740992L)).getMessage());
         assertEquals("9007199254740991", Json.canonicalizeStrict(9007199254740991L));
         assertEquals("5", Json.canonicalizeStrict(5));
         assertEquals("9007199254740992", Json.canonicalize(9007199254740992L));

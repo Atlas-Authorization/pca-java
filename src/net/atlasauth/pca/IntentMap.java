@@ -33,8 +33,8 @@ public final class IntentMap {
     public static final int MAX_MAP_CUTS = 256;
     public static final int MAX_MAP_VALUES = 256;
     public static final int MAX_MAP_STRING_BYTES = 256;
-    static final List<String> METRIC_FIELDS = List.of("residual_risk_ppm", "burden_ppm", "uncertainty_ppm", "disagreement_ppm", "mean_harm_ppm",
-        "fidelity_est_ppm", "entropy_mbits", "questions", "conflicts");
+    static final List<String> METRIC_FIELDS = NullSafe.list(List.of("residual_risk_ppm", "burden_ppm", "uncertainty_ppm", "disagreement_ppm", "mean_harm_ppm",
+        "fidelity_est_ppm", "entropy_mbits", "questions", "conflicts"));
     private static final Pattern PATH_RE = Pattern.compile("action\\.params\\.[A-Za-z0-9_]{1,64}");
 
     /** The Z0 verdict: when {@code ok}, the action's cell indices, its {@code p_ppm} and the committed residual risk. */
@@ -140,7 +140,7 @@ public final class IntentMap {
         Map<String, Object> d = IntentJs.obj(dO);
         Object kind = d.get("kind");
         if ("num".equals(kind)) {
-            List<String> ks = List.of("kind", "path", "lo", "hi", "cuts");
+            List<String> ks = NullSafe.list(List.of("kind", "path", "lo", "hi", "cuts"));
             if (!closed(d, ks, ks)) return "dims[" + j + "] must be exactly {kind, path, lo, hi, cuts}";
             if (!isDimPath(d.get("path")) || "action.resource".equals(d.get("path"))) return "dims[" + j + "].path must be action.params.<name>";
             if (!IntentJs.isInt(d.get("lo")) || !IntentJs.isInt(d.get("hi")) || IntentJs.num(d.get("lo")) > IntentJs.num(d.get("hi")))
@@ -155,14 +155,14 @@ public final class IntentMap {
             return null;
         }
         if ("cat".equals(kind)) {
-            List<String> ks = List.of("kind", "path", "values");
+            List<String> ks = NullSafe.list(List.of("kind", "path", "values"));
             if (!closed(d, ks, ks)) return "dims[" + j + "] must be exactly {kind, path, values}";
             if (!isDimPath(d.get("path"))) return "dims[" + j + "].path must be action.resource or action.params.<name>";
             Object vsO = d.get("values");
             if (!(vsO instanceof List) || ((List<?>) vsO).isEmpty() || ((List<?>) vsO).size() > MAX_MAP_VALUES) return "dims[" + j + "].values must be an array of 1.." + MAX_MAP_VALUES;
             List<?> vs = (List<?>) vsO;
             Set<String> seen = new HashSet<>();
-            List<String> vk = List.of("kind", "value");
+            List<String> vk = NullSafe.list(List.of("kind", "value"));
             for (int i = 0; i < vs.size(); i++) {
                 Object v = vs.get(i);
                 if (!(v instanceof Map) || !closed(v, vk, vk)) return "dims[" + j + "].values[" + i + "] must be exactly {kind, value}";
@@ -181,7 +181,7 @@ public final class IntentMap {
 
     /** Shape of a header leaf (closed, typed; {@code cells} equals the product of the dimensions' cell counts). Null = well-formed. */
     public static String headerError(Object h) {
-        List<String> ks = List.of("verb", "first", "cells", "dims");
+        List<String> ks = NullSafe.list(List.of("verb", "first", "cells", "dims"));
         if (!(h instanceof Map) || !closed(h, ks, ks)) return "the header leaf must be exactly {verb, first, cells, dims}";
         Object verb = IntentJs.get(h, "verb");
         if (!isStr(verb, 128) || ((String) verb).isEmpty()) return "header.verb must be a non-empty string of at most 128 UTF-8 bytes";
@@ -207,7 +207,7 @@ public final class IntentMap {
     }
 
     public static String cellError(Object c) {
-        List<String> ks = List.of("verb", "cell", "p_ppm", "in_grant");
+        List<String> ks = NullSafe.list(List.of("verb", "cell", "p_ppm", "in_grant"));
         if (!(c instanceof Map) || !closed(c, ks, ks)) return "the cell leaf must be exactly {verb, cell, p_ppm, in_grant}";
         Object verb = IntentJs.get(c, "verb");
         if (!isStr(verb, 128) || ((String) verb).isEmpty()) return "cell.verb must be a non-empty string of at most 128 UTF-8 bytes";
@@ -233,7 +233,7 @@ public final class IntentMap {
     }
 
     public static String learnerError(Object l) {
-        List<String> ks = List.of("learner_digest");
+        List<String> ks = NullSafe.list(List.of("learner_digest"));
         if (!(l instanceof Map) || !closed(l, ks, ks)) return "the learner leaf must be exactly {learner_digest}";
         return IntentJs.b32(IntentJs.get(l, "learner_digest")) ? null : "learner.learner_digest must be canonical base64url (32 bytes)";
     }
@@ -248,15 +248,14 @@ public final class IntentMap {
             String path = (String) d.get("path");
             Object x = path.equals("action.resource") ? resource
                 : params instanceof Map && IntentJs.own(params, path.substring("action.params.".length())) ? IntentJs.get(params, path.substring("action.params.".length())) : null;
-            boolean present = path.equals("action.resource") || (params instanceof Map && IntentJs.own(params, path.substring("action.params.".length())));
             long i = -1;
             if ("num".equals(d.get("kind"))) {
-                if (present && IntentJs.isInt(x)) {
+                if (IntentJs.isInt(x)) {
                     double v = IntentJs.num(x);
                     List<long[]> cs = numCells(d);
                     for (int k = 0; k < cs.size(); k++) if (v >= cs.get(k)[0] && v <= cs.get(k)[1]) { i = k; break; }
                 }
-            } else if (present && x instanceof String && !Json.hasLoneSurrogate((String) x)) {
+            } else if (x instanceof String && !Json.hasLoneSurrogate((String) x)) {
                 String s = (String) x;
                 List<?> vs = (List<?>) d.get("values");
                 int best = -1, bestLen = -1;
@@ -276,7 +275,7 @@ public final class IntentMap {
     }
 
     private static String entryShape(Object e, String what) {
-        List<String> ks = List.of("index", "salt", "leaf", "path");
+        List<String> ks = NullSafe.list(List.of("index", "salt", "leaf", "path"));
         if (!(e instanceof Map) || !closed(e, ks, ks)) return "disclosure." + what + " must be exactly {index, salt, leaf, path}";
         if (!IntentJs.isNonNeg(IntentJs.get(e, "index"))) return "disclosure." + what + ".index must be a non-negative safe integer";
         if (!IntentJs.b32(IntentJs.get(e, "salt"))) return "disclosure." + what + ".salt must be canonical base64url (32 bytes)";
@@ -289,7 +288,7 @@ public final class IntentMap {
 
     /** Shape of a Z0 disclosure (closed, typed). Null = well-formed. */
     public static String disclosureError(Object d) {
-        List<String> ks = List.of("size", "header", "cell", "metrics");
+        List<String> ks = NullSafe.list(List.of("size", "header", "cell", "metrics"));
         if (!(d instanceof Map) || !closed(d, ks, ks)) return "the disclosure must be exactly {size, header, cell, metrics}";
         Object size = IntentJs.get(d, "size");
         if (!IntentJs.isInt(size) || IntentJs.num(size) < 4 || IntentJs.num(size) > MAX_MAP_LEAVES) return "disclosure.size must be a safe integer in [4, " + MAX_MAP_LEAVES + "]";

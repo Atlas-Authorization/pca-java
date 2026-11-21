@@ -4,6 +4,7 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -15,12 +16,14 @@ import org.bouncycastle.math.ec.rfc8032.Ed25519;
 
 /**
  * Reference verifier for the CORE PCActn checks, wire format v2. Byte-matches @atlasauth/pca.
- * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter, then
+ * Normative check order: wire, version, audience, validity, chain, plan_inclusion, leaf_signature, counter_format, then
  * intent when evaluated (Intent Layer M2; see {@link IntentPolicy}) (wire failure is terminal). Requires BouncyCastle (bcprov-jdk18on, org.bouncycastle.math.ec.rfc8032.Ed25519).
  */
 public final class Pca {
     private Pca() {}
 
+    /** The maturity tier of this SDK (the same value as the {@code pca.maturity} build property). */
+    public static final String MATURITY = "stable";
     public static final int WIRE_VERSION = 2;
     public static final int MAX_CHAIN_HOPS = 16;
     /** Shared hard caveat caps (all PCA verifiers): per-hop cumulative list, and the sum over every hop of a chain. */
@@ -34,7 +37,7 @@ public final class Pca {
     public static boolean artifactTooLarge(String text) {
         if (text.length() > MAX_ARTIFACT_BYTES) return true;
         if ((long) text.length() * 3 <= MAX_ARTIFACT_BYTES) return false;
-        return text.getBytes(StandardCharsets.UTF_8).length > MAX_ARTIFACT_BYTES;
+        return Json.utf8(text).length > MAX_ARTIFACT_BYTES;
     }
     public static final String CAVEAT_LIMIT_REASON =
         "chain exceeds caveat limit (max " + MAX_CAVEATS_PER_HOP + " per hop, " + MAX_CAVEATS_PER_CHAIN + " per chain)";
@@ -63,6 +66,8 @@ public final class Pca {
 
     // ---- Intent Layer M2: envelope.intent ----
     public static final String INTENT_GOAL_PREFIX = "pca-intent:v1:";
+    /** Goal binding v3: {@code pca-intent:v3:<goal_digest>:<policy_digest>} (the digests of the approved Goal IR and its compiled policy). */
+    public static final String INTENT_GOAL_V3_PREFIX = "pca-intent:v3:";
     /** Domain of the root grant's salted goal commitment (envelope goal_commit). */
     public static final String INTENT_GOAL_COMMIT_DOMAIN = "atlas-pca/goal/v1\0";
     public static final long PPM_ONE = 1_000_000L;
@@ -84,18 +89,34 @@ public final class Pca {
         public final Double minFidelityPpm;
         /** Deny when the claimed {@code residual_risk_ppm} is above this (null = unset). Setting it implies require. */
         public final Double maxResidualRiskPpm;
+        /**
+         * Goal binding v3: the root grant must open against exactly this approved Goal IR + compiled policy (a closed object
+         * {@code goal_digest, policy_digest}, see {@link Pca#approvedGoal}). Null = unset. Setting it implies require. Any value
+         * that is not a well-formed reference is a misconfiguration and fails the {@code intent} check closed.
+         */
+        public final Object approvedGoal;
 
         public IntentPolicy(boolean require, Double minFidelityPpm, Double maxResidualRiskPpm) {
+            this(require, minFidelityPpm, maxResidualRiskPpm, null);
+        }
+
+        public IntentPolicy(boolean require, Double minFidelityPpm, Double maxResidualRiskPpm, Object approvedGoal) {
             this.require = require;
             this.minFidelityPpm = minFidelityPpm;
             this.maxResidualRiskPpm = maxResidualRiskPpm;
+            this.approvedGoal = approvedGoal;
+        }
+
+        /** A policy that binds every intent to the approved goal (v3): {@code {approved_goal}}. */
+        public static IntentPolicy approvedGoalPolicy(String goalDigest, String policyDigest) {
+            return new IntentPolicy(false, null, null, approvedGoal(goalDigest, policyDigest));
         }
 
         /** {@code {require: true}}. */
         public static IntentPolicy required() { return new IntentPolicy(true, null, null); }
 
         /** True iff the policy is active (the intent check runs even for a PCActn without the field). */
-        public boolean isActive() { return require || minFidelityPpm != null || maxResidualRiskPpm != null; }
+        public boolean isActive() { return require || minFidelityPpm != null || maxResidualRiskPpm != null || approvedGoal != null; }
 
         /**
          * From a parsed JSON object {@code {require?, min_fidelity_ppm?, max_residual_risk_ppm?}} (Json.parse /
@@ -105,8 +126,10 @@ public final class Pca {
         public static IntentPolicy fromJson(Object o) {
             if (!(o instanceof Map)) return null;
             Map<?, ?> m = (Map<?, ?>) o;
+            // a present approved_goal that is not an object (JSON null included) is kept as an invalid marker: it fails closed
+            Object ag = !m.containsKey("approved_goal") ? null : m.get("approved_goal") instanceof Map ? m.get("approved_goal") : new Object();
             return new IntentPolicy(Boolean.TRUE.equals(m.get("require")),
-                threshold(m, "min_fidelity_ppm"), threshold(m, "max_residual_risk_ppm"));
+                threshold(m, "min_fidelity_ppm"), threshold(m, "max_residual_risk_ppm"), ag);
         }
 
         /**
@@ -140,6 +163,37 @@ public final class Pca {
     /** The goal string that binds a grant to an intent statement and Intent Map. */
     public static String intentGoal(String ref, String mapDigest) {
         return INTENT_GOAL_PREFIX + ref + (mapDigest != null && !mapDigest.isEmpty() ? ":" + mapDigest : "");
+    }
+
+    /** An approved-goal reference {@code {goal_digest, policy_digest}} (not validated here: see {@link #isApprovedGoalRef}). */
+    public static Map<String, Object> approvedGoal(String goalDigest, String policyDigest) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("goal_digest", goalDigest);
+        m.put("policy_digest", policyDigest);
+        return m;
+    }
+
+    /** Well-formed: a closed object of exactly {@code goal_digest} and {@code policy_digest}, each canonical base64url of 32 bytes. */
+    public static boolean isApprovedGoalRef(Object v) {
+        if (!(v instanceof Map)) return false;
+        Map<?, ?> r = (Map<?, ?>) v;
+        return r.size() == 2 && decodeB64uStrict(r.get("goal_digest"), 32) != null && decodeB64uStrict(r.get("policy_digest"), 32) != null;
+    }
+
+    /** The v3 goal string. Throws {@link IllegalArgumentException} on a malformed reference: never commit to garbage. */
+    public static String intentGoalV3(Object ref) {
+        if (!isApprovedGoalRef(ref)) throw new IllegalArgumentException("intentGoalV3: goal_digest and policy_digest must be canonical base64url (32 bytes)");
+        Map<?, ?> r = (Map<?, ?>) ref;
+        return INTENT_GOAL_V3_PREFIX + r.get("goal_digest") + ":" + r.get("policy_digest");
+    }
+
+    /** The v3 goal commitment for a salt. */
+    public static String intentGoalCommitV3(Object ref, String goalSalt) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("d", INTENT_GOAL_COMMIT_DOMAIN);
+        m.put("goal", intentGoalV3(ref));
+        m.put("salt", goalSalt);
+        return hashCanonical(m);
     }
 
     /** The goal commitment an {@code envelope.intent} claims the root grant carries. */
@@ -227,11 +281,17 @@ public final class Pca {
         try {
             if (active && (!okThreshold(policy.minFidelityPpm) || !okThreshold(policy.maxResidualRiskPpm)))
                 return "intent policy misconfigured: thresholds must be non-negative safe integers (fail closed)";
+            if (active && policy.approvedGoal != null && !isApprovedGoalRef(policy.approvedGoal))
+                return "intent policy misconfigured: approved_goal digests must be canonical base64url (32 bytes) (fail closed)";
             if (!present) return "this verifier requires an intent binding but the PCActn carries none";
             String commit = rootGoalCommit(grant);
             if (commit == null) return "the root grant carries no envelope goal commitment to bind the intent to";
             Map<String, Object> i = (Map<String, Object>) intent;
-            String opened = session != null
+            if (policy != null && policy.approvedGoal != null) {
+                if (!intentGoalCommitV3(policy.approvedGoal, (String) i.get("goal_salt")).equals(commit))
+                    return "the root grant's goal commitment does not open to the approved goal and compiled policy (v3)";
+            }
+            String opened = policy != null && policy.approvedGoal != null ? commit : session != null
                 ? (IntentMap.MAP_FORM_COMMIT.equals(mapForm)
                     ? intentGoalCommitV2c(session, (String) i.get("map_digest"), (String) i.get("goal_salt"))
                     : intentGoalCommitV2(session, (String) i.get("map_digest"), (String) i.get("goal_salt")))
@@ -298,10 +358,7 @@ public final class Pca {
         byte[] raw = decodeB64uStrict(value, -1);
         if (raw == null) return null;
         try {
-            return StandardCharsets.UTF_8.newDecoder()
-                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                .decode(java.nio.ByteBuffer.wrap(raw)).toString();
+            return StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(raw)).toString();
         } catch (java.nio.charset.CharacterCodingException e) {
             return null;
         }
@@ -346,6 +403,9 @@ public final class Pca {
 
     public static String hashCanonical(Object v) { return b64(sha(canonBytes(v))); }
 
+    /** The content address of a PCActn (the reference's {@code pcactnDigest}): {@link #hashCanonical} of the artifact. */
+    public static String pcactnDigest(Object pcactn) { return hashCanonical(pcactn); }
+
     /** base64url(sha256(strictCanonical(v))). */
     public static String hashStrict(Object v) { return b64(sha(Json.canonicalizeStrict(v).getBytes(StandardCharsets.UTF_8))); }
 
@@ -388,6 +448,9 @@ public final class Pca {
         try {
             if (proof == null || !(proof.get("path") instanceof List)) return false;
             if (!Json.isSafeInt(proof.get("index")) || !Json.isSafeInt(proof.get("size"))) return false;
+            // only the sha256 suite is native: a sha384 (or unknown) tagged proof must not verify as sha256; -0 index refused as in the reference
+            if (proof.containsKey("hash_suite") && !"sha256".equals(proof.get("hash_suite"))) return false;
+            if (proof.get("index") instanceof Json.Num && ((Json.Num) proof.get("index")).raw.trim().startsWith("-")) return false;
             long index = Json.asLong(proof.get("index")), size = Json.asLong(proof.get("size"));
             if (size < 1 || index < 0 || index >= size) return false;
             List<String> shape = pathShape(index, size);
@@ -520,7 +583,7 @@ public final class Pca {
 
     /** holder_pq commitment: b64u(sha256(domain || utf8(pq_pk string))). Mirrors holderPqCommitment in capability.ts. */
     static String holderPqCommitment(String pqPk) {
-        return b64(sha(HOLDER_PQ_DOMAIN, pqPk.getBytes(StandardCharsets.UTF_8)));
+        return b64(sha(HOLDER_PQ_DOMAIN, Json.utf8(pqPk)));
     }
 
     /** F-2: a PQ-key suite (ml-dsa-65 / hybrid) is accepted only under the pq_pk the signer's holder committed to. Returns null when fine. */
@@ -538,7 +601,7 @@ public final class Pca {
     static String suitePolicyError(Object alg, boolean algPresent, String label, List<String> allowed) {
         if (allowed == null) return null;
         String a = algPresent ? (alg instanceof String ? (String) alg : null) : "ed25519";
-        return a != null && allowed.contains(a) ? null : label + ": signature suite is not allowed by this verifier's suite policy";
+        return a != null && allowed.contains(a) ? null : label + ": signature suite '" + (algPresent ? String.valueOf(alg) : "ed25519") + "' is not allowed by this verifier's suite policy";
     }
 
     /** Returns "" when OK, else an error label. */
@@ -658,7 +721,32 @@ public final class Pca {
                 if (!same) return label + ": caveat " + j + " altered or reordered";
             }
         }
-        return "";
+        // the leaf holds the full append-only list
+        String alloc = allocationsError(asList(asMap(chain.get(chain.size() - 1)).get("caveats")));
+        return alloc == null ? "" : alloc;
+    }
+
+    /** As above for a caveat list of unknown shape: anything but an array is {@code malformed caveats}. */
+    @SuppressWarnings("unchecked")
+    static String allocationsError(Object caveats) {
+        return caveats instanceof List ? allocationsError((List<Object>) caveats) : "malformed caveats";
+    }
+
+    /** allocationsMonotone: every budget_alloc limit is finite, >= 0 and never above the one before it. The reason, or null. */
+    static String allocationsError(List<Object> caveats) {
+        double prev = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < caveats.size(); i++) {
+            Map<String, Object> cv = asMap(caveats.get(i));
+            if (!"budget_alloc".equals(cv.get("type"))) continue;
+            Double lim = Caveats.fin(cv.get("limit"));
+            if (lim == null || lim < 0) return "budget_alloc caveat " + i + ": limit must be a finite number >= 0";
+            if (lim > prev) {
+                return "budget_alloc caveat " + i + ": allocation " + AttestCommon.jsNumString(lim) + " widens the parent's carried allocation "
+                    + AttestCommon.jsNumString(prev) + " (monotone: a child can only allocate <= its parent)";
+            }
+            prev = lim;
+        }
+        return null;
     }
 
     // ---- wire format v2 ----
@@ -672,11 +760,13 @@ public final class Pca {
         "intent",
         // Intent Layer v2 (additive, SIGNED): the session member (rule 13; see IntentSession.validateWire / IntentV2).
         "intent_session",
+        // K3 consistency token (additive, SIGNED): the `fresh_at` member (see K3.validateFreshAtWire / K3.decideFreshAt).
+        "fresh_at",
         // B4 crypto-agility (additive): absent `alg` == "ed25519" and validates exactly as today.
         "alg", "pq_pk", "pq_sig");
 
     /** Length unit for aud / nonce limits is UTF-8 BYTES. */
-    private static int utf8Len(String s) { return s.getBytes(StandardCharsets.UTF_8).length; }
+    private static int utf8Len(String s) { return Json.utf8(s).length; }
 
     /**
      * Closed capability-hop key set (parent optional). The B4 crypto-agility fields (alg/pq_pk/pq_sig) are
@@ -713,10 +803,10 @@ public final class Pca {
             if (!Json.isSafeInt(p.get("iat"))) return "'iat' must be a safe integer";
             if (!Json.isSafeInt(p.get("exp"))) return "'exp' must be a safe integer";
             Object aud = p.get("aud");
-            if (!isStr(aud) || ((String) aud).isEmpty() || utf8Len((String) aud) > MAX_AUD_LEN) return "'aud' must be a non-empty string";
+            if (!isStr(aud) || ((String) aud).isEmpty() || utf8Len((String) aud) > MAX_AUD_LEN) return "'aud' must be a non-empty string (<= 256 UTF-8 bytes)";
             if (p.containsKey("nonce")) {
                 Object n = p.get("nonce");
-                if (!isStr(n) || ((String) n).isEmpty() || utf8Len((String) n) > MAX_NONCE_LEN) return "'nonce' must be a non-empty string";
+                if (!isStr(n) || ((String) n).isEmpty() || utf8Len((String) n) > MAX_NONCE_LEN) return "'nonce' must be a non-empty string (<= 128 UTF-8 bytes)";
             }
             // B4 crypto-agility: validate `alg`/`sig`/`pq_pk`/`pq_sig` per suite. With no `alg` this asserts exactly
             // the classical 64-byte `sig` and that `pq_pk`/`pq_sig` are absent. Unknown `alg` fails closed.
@@ -815,6 +905,10 @@ public final class Pca {
                 String sessionErr = IntentSession.validateWire(p.get("intent_session"));
                 if (sessionErr != null) return sessionErr;
             }
+            if (p.containsKey("fresh_at")) {
+                String freshErr = K3.validateFreshAtWire(p.get("fresh_at"));
+                if (freshErr != null) return freshErr;
+            }
             if (p.containsKey("prohibition_evidence") && !isObj(p.get("prohibition_evidence")) && !(p.get("prohibition_evidence") instanceof List))
                 return "'prohibition_evidence' must be an object or array";
             if (p.containsKey("threshold")) {
@@ -867,6 +961,18 @@ public final class Pca {
     /** As above with the Intent Layer v2 verifier state (null = none: the v2 checks run only for a PCActn carrying intent_session). */
     public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
                                            IntentPolicy intentPolicy, IntentV2.Context intentV2) {
+        return verifyPcactnJson(text, grant, now, audience, allowedSuites, intentPolicy, intentV2, null);
+    }
+
+    /** As above with the K3 {@code fresh_at} consistency-token policy (null = none: a PCActn carrying {@code fresh_at} is then refused, fail closed). */
+    public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                           IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt) {
+        return verifyPcactnJson(text, grant, now, audience, allowedSuites, intentPolicy, intentV2, freshAt, PlanRoots.NONE);
+    }
+
+    /** As above with the {@code plan_root_authorized} policy ({@link PlanRoots}). */
+    public static Verdict verifyPcactnJson(String text, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                           IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt, PlanRoots planRoots) {
         if (text != null && artifactTooLarge(text)) { // FIRST: before any parsing (null: refused by the strict parse below)
             Verdict big = new Verdict();
             big.fail("wire", ARTIFACT_SIZE_REASON);
@@ -880,13 +986,16 @@ public final class Pca {
             v.fail("wire", "strict JSON: " + e.getMessage());
             return v;
         }
-        return verifyPcactn(parsed, grant, now, audience, allowedSuites, intentPolicy, intentV2);
+        return verifyPcactn(parsed, grant, now, audience, allowedSuites, intentPolicy, intentV2, freshAt, planRoots);
     }
 
     /**
      * Verify a parsed PCActn (Json.parse / parseLenient tree). Check order: wire (terminal), version, audience,
-     * validity, chain, plan_inclusion, leaf_signature, counter. allow = every check true.
+     * validity, chain, plan_inclusion, leaf_signature, counter_format. allow = every check true.
      */
+    /** Test seam: runs after every core check, inside the core's fault handler (null in production). */
+    static volatile Runnable afterCoreChecksForTest;
+
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience) {
         return verifyPcactn(pcactn, grant, now, audience, null);
     }
@@ -898,7 +1007,7 @@ public final class Pca {
 
     /**
      * As above with an optional Intent Layer M2 policy (null = none). The {@code intent} check is reported (after
-     * counter) iff the PCActn carries {@code intent} or the policy is active; otherwise the verdict is the pre-M2 one.
+     * counter_format) iff the PCActn carries {@code intent} or the policy is active; otherwise the verdict is the pre-M2 one.
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
                                        IntentPolicy intentPolicy) {
@@ -913,9 +1022,65 @@ public final class Pca {
      */
     public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
                                        IntentPolicy intentPolicy, IntentV2.Context intentV2) {
+        return verifyPcactn(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2, null);
+    }
+
+    /**
+     * As above with the K3 {@code fresh_at} consistency-token policy ({@link K3.FreshAtPolicy}; null = none). After the intent checks a
+     * {@code fresh_at} check is reported exactly when the PCActn carries the member, a side-carried token is read, or the policy
+     * requires one; a stale verifier is an {@code escalate:} failure. Without the member and without a policy the verdict is unchanged.
+     */
+    public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                       IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt) {
+        return verifyPcactn(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2, freshAt, PlanRoots.NONE);
+    }
+
+    /**
+     * The core's {@code plan_root_authorized} policy (K5). {@link #authorized} given (even empty): the check passes iff {@code plan.root} is
+     * listed and FAILS otherwise (the list wins over {@link #skip}). Not given: it FAILS too (a verifier with no authorized plan configured
+     * refuses), unless the explicit, loudly named opt-out {@link #skip} ({@code insecureSkipPlanRootCheck}) is set, which leaves the check
+     * unreported (not enforced; the verdict is unaffected). {@link Authorize#authorize} runs its own plan check and always passes the skip.
+     */
+    public static final class PlanRoots {
+        /** No plan configured, no opt-out: {@code plan_root_authorized} fails. */
+        public static final PlanRoots NONE = new PlanRoots(null, false);
+        /** The explicit opt-out ({@code insecureSkipPlanRootCheck}): the check is not enforced. */
+        public static final PlanRoots SKIP = new PlanRoots(null, true);
+        final List<String> authorized;
+        final boolean skip;
+
+        private PlanRoots(List<String> authorized, boolean skip) {
+            this.authorized = authorized;
+            this.skip = skip;
+        }
+
+        /** {@code authorizedPlanRoots} (null = not given) and {@code insecureSkipPlanRootCheck}. */
+        public static PlanRoots of(List<String> authorizedPlanRoots, boolean insecureSkipPlanRootCheck) {
+            return new PlanRoots(authorizedPlanRoots == null ? null : List.copyOf(authorizedPlanRoots), insecureSkipPlanRootCheck);
+        }
+
+        boolean enforced() { return authorized != null || !skip; }
+    }
+
+    /** As above with the {@code plan_root_authorized} policy ({@link PlanRoots}; null = {@link PlanRoots#NONE}). */
+    public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                       IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt, PlanRoots planRoots) {
+        return verifyPcactn(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2, freshAt, planRoots, null, null);
+    }
+
+    /**
+     * As above with the verifier hooks ({@code hooks.attestation}, {@code hooks.zk} of the reference). An enforced attestation result passes
+     * or fails the {@code attestation} check; not enforced (or no hook) leaves it unreported. The zk hook runs only for a PCActn that
+     * CARRIES {@code zk_compliance}: an enforced result passes or fails the {@code zk_compliance} check, and a carried proof that no hook
+     * enforced (none, or one reporting not enforced) is refused: an unverified proof is never accepted. A hook that throws is a fault
+     * ({@code malformed}).
+     */
+    public static Verdict verifyPcactn(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
+                                       IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt, PlanRoots planRoots,
+                                       PcaCore.Hook attestation, PcaCore.Hook zk) {
         // TOTAL (R6-05): any residual fault on hostile input is a terminal wire refusal, never an exception.
         try {
-            return verifyPcactnUnchecked(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2);
+            return verifyPcactnUnchecked(pcactn, grant, now, audience, allowedSuites, intentPolicy, intentV2, freshAt, planRoots == null ? PlanRoots.NONE : planRoots, attestation, zk);
         } catch (RuntimeException ex) {
             Verdict w = new Verdict();
             w.fail("wire", "malformed input (" + ex.getClass().getSimpleName() + ")");
@@ -924,7 +1089,8 @@ public final class Pca {
     }
 
     private static Verdict verifyPcactnUnchecked(Object pcactn, Map<String, Object> grant, long now, String audience, List<String> allowedSuites,
-                                                 IntentPolicy intentPolicy, IntentV2.Context intentV2) {
+                                                 IntentPolicy intentPolicy, IntentV2.Context intentV2, K3.FreshAtPolicy freshAt, PlanRoots planRoots,
+                                                 PcaCore.Hook attestation, PcaCore.Hook zk) {
         Verdict v = new Verdict();
         String wire = validateWireV2(pcactn);
         if (wire != null) {
@@ -935,6 +1101,7 @@ public final class Pca {
         v.checks.put("wire", true);
         boolean intentPresent = p.containsKey("intent");
         boolean intentReported = intentPresent || (intentPolicy != null && intentPolicy.isActive());
+        boolean faulted = false;
         try {
             // version
             if (Json.asLong(p.get("ver")) == WIRE_VERSION) v.checks.put("version", true);
@@ -986,6 +1153,12 @@ public final class Pca {
             if (incl) v.checks.put("plan_inclusion", true);
             else v.fail("plan_inclusion", "action is not a node of the committed plan");
 
+            // K5: the plan root must be one the principal authorized; with nothing configured it FAILS unless the explicit opt-out is set
+            if (planRoots.authorized == null) {
+                if (!planRoots.skip) v.fail("plan_root_authorized", "no authorized plan is configured for this verifier (set authorizedPlanRoots, or the explicit insecureSkipPlanRootCheck)");
+            } else if (planRoots.authorized.contains(asStr(plan.get("root")))) v.checks.put("plan_root_authorized", true);
+            else v.fail("plan_root_authorized", "the plan root has not been authorized by the principal");
+
             // leaf signature: the B4 crypto-agility seam. ed25519 is byte-identical to the classical path;
             // ml-dsa-65 / hybrid add ML-DSA-65 (FIPS-204) over the SAME signed message. Fail-closed.
             boolean sigOk = false;
@@ -1001,8 +1174,8 @@ public final class Pca {
             else v.fail("leaf_signature", "signature does not verify under the leaf holder key");
 
             // counter
-            if (Json.isSafeInt(p.get("counter")) && Json.asLong(p.get("counter")) >= 0) v.checks.put("counter", true);
-            else v.fail("counter", "missing or not a non-negative safe integer");
+            if (Json.isSafeInt(p.get("counter")) && Json.asLong(p.get("counter")) >= 0) v.checks.put("counter_format", true);
+            else v.fail("counter_format", "missing or not a non-negative safe integer");
 
             // Intent Layer M2: `intent` (reported iff the PCActn carries intent or the policy is active)
             Object session = p.containsKey("intent_session") ? asMap(p.get("intent_session")).get("session") : null;
@@ -1012,22 +1185,268 @@ public final class Pca {
                 if (intentWhy.isEmpty()) v.checks.put("intent", true);
                 else v.fail("intent", intentWhy);
             }
+            if (afterCoreChecksForTest != null) afterCoreChecksForTest.run();
         } catch (RuntimeException e) {
             if (v.reason.isEmpty()) v.reason = "malformed PCActn: " + e;
+            faulted = true;
         }
         // any check not reached (internal error) is a failure; keep normative key order
         Map<String, Boolean> ordered = new LinkedHashMap<>();
-        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "leaf_signature", "counter"})
+        for (String k : new String[] {"wire", "version", "audience", "validity", "chain", "grant_ref_bound", "plan_inclusion", "plan_root_authorized", "leaf_signature", "counter_format"}) {
+            if (k.equals("plan_root_authorized") && !planRoots.enforced()) continue; // not enforced: unreported
             ordered.put(k, Boolean.TRUE.equals(v.checks.get(k)));
+        }
         if (intentReported) ordered.put("intent", Boolean.TRUE.equals(v.checks.get("intent")));
+        // a fault anywhere in the core is a failure even when every check it reached had passed (TS pcactn.ts: st.malformed)
+        if (faulted) ordered.put("malformed", false);
         // Intent Layer v2 (rules 13-18): reported in pipeline order exactly when IntentV2 reports them (total: never throws)
         for (IntentV2.Check c : IntentV2.decide(p, grant, intentV2, now).checks) {
             ordered.put(c.name, c.ok);
             if (!c.ok && v.reason.isEmpty()) v.reason = c.name + ": " + c.reason;
         }
+        // K3 consistency token: `fresh_at` (reported only when the PCActn carries the member, a side-carried token is read, or the policy requires one)
+        K3.FreshAtCheck fa = K3.decideFreshAt(p.containsKey("fresh_at"), p.get("fresh_at"), freshAt, now);
+        if (fa.status.equals("pass")) ordered.put("fresh_at", true);
+        else if (fa.status.equals("fail")) {
+            ordered.put("fresh_at", false);
+            if (v.reason.isEmpty()) v.reason = "fresh_at: " + fa.reason;
+        }
+        // the verifier hooks (hooks.attestation, hooks.zk); a hook that throws is a fault, and a carried proof that no hook enforced is refused
+        boolean zkEnforced = false;
+        try {
+            runVerifierHook(v, "attestation", attestation, p, grant, now);
+            if (p.containsKey("zk_compliance")) zkEnforced = runVerifierHook(v, "zk_compliance", zk, p, grant, now);
+        } catch (RuntimeException e) {
+            if (v.reason.isEmpty()) v.reason = "malformed PCActn: " + e;
+            ordered.put("malformed", false);
+        }
+        if (v.checks.containsKey("attestation")) ordered.put("attestation", Boolean.TRUE.equals(v.checks.get("attestation")));
+        // fail closed at the core: an unverified zk proof must never be silently accepted
+        if (p.containsKey("zk_compliance")) {
+            if (zkEnforced) ordered.put("zk_compliance", Boolean.TRUE.equals(v.checks.get("zk_compliance")));
+            else {
+                ordered.put("zk_compliance", false);
+                if (v.reason.isEmpty()) v.reason = "zk_compliance: PCActn carries a zk_compliance proof but no zk verifier enforced it (fail closed): configure hooks.zk or do not present a proof";
+            }
+        }
         v.checks.clear();
         v.checks.putAll(ordered);
         v.allow = !v.checks.containsValue(Boolean.FALSE);
         return v;
+    }
+
+    /** Runs one verifier hook (the reference's {@code run(name, hook)}); true iff it enforced. An enforced result passes or fails {@code name}. */
+    private static boolean runVerifierHook(Verdict v, String name, PcaCore.Hook hook, Map<String, Object> p, Map<String, Object> grant, long now) {
+        if (hook == null) return false;
+        PcaCore.HookResult hr;
+        try {
+            hr = hook.run(new PcaCore.Ctx(p, grant, now));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+        if (hr == null || !hr.enforced) return false;
+        if (hr.ok) v.checks.put(name, true);
+        else v.fail(name, hr.reason != null ? hr.reason : "rejected");
+        return true;
+    }
+
+    // ---- hash-suite agility, wire constants and key encoders (hash.ts, wire.ts, keys.ts public surface) ----
+
+    /** The hash suite a digest uses when none is named (back-compat: absent means this). */
+    public static final String DEFAULT_HASH_SUITE = "sha256";
+    /** Digest byte length per suite. */
+    public static final Map<String, Integer> HASH_LEN = Collections.unmodifiableMap(new LinkedHashMap<String, Integer>() {
+        private static final long serialVersionUID = 1L;
+        { put("sha256", 32); put("sha384", 48); }
+    });
+    public static final int PCACTN_WIRE_VERSION = WIRE_VERSION;
+    /** The default PCActn lifetime (20 minutes) when the issuer names neither {@code exp} nor a ttl. */
+    public static final long PCACTN_DEFAULT_TTL_MS = 20 * 60_000L;
+    /** Milliseconds per freshness epoch when the verifier names none. */
+    public static final long DEFAULT_FRESHNESS_EPOCH_MS = 60_000L;
+    /** An omitted reversibility_class commits as this default (on a plan node and an action alike). */
+    public static final String DEFAULT_REVERSIBILITY_CLASS = DEFAULT_REV;
+    /** The digest of an action with no params: {@code paramsDigest(null)}. */
+    public static final String EMPTY_PARAMS_DIGEST = paramsDigest(null);
+    /** The closed set of top-level fields of a ver-2 PCActn, in the reference's order. */
+    public static final List<String> PCACTN_REQUIRED_FIELDS = Collections.unmodifiableList(new ArrayList<>(REQUIRED));
+    public static final List<String> PCACTN_OPTIONAL_FIELDS = Collections.unmodifiableList(new ArrayList<>(OPTIONAL));
+
+    /** True iff {@code s} is {@code "sha256"} or {@code "sha384"}; anything else must fail closed at the caller. */
+    public static boolean isHashSuite(Object s) { return "sha256".equals(s) || "sha384".equals(s); }
+
+    /** Hash raw bytes under a suite (null = the default; {@code sha256} is byte-identical to a bare SHA-256). Unknown suite: IllegalArgumentException. */
+    public static byte[] hashWithSuite(byte[] bytes, String suite) {
+        String s = suite == null ? DEFAULT_HASH_SUITE : suite;
+        if (!isHashSuite(s)) throw new IllegalArgumentException("unknown hash suite '" + suite + "'");
+        try {
+            return java.security.MessageDigest.getInstance("sha384".equals(s) ? "SHA-384" : "SHA-256").digest(bytes);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** base64url(H(strictCanonical(value))) under {@code suite}; the default suite equals {@link #hashCanonical(Object)}. */
+    public static String hashCanonical(Object v, String suite) { return b64(hashWithSuite(canonBytes(v), suite)); }
+
+    /** Encoded (unpadded base64url) length of {@code n} bytes. */
+    public static int b64uLen(int n) { return (int) Math.ceil(n * 4.0 / 3.0); }
+
+    /** True iff {@code s} is canonical base64url, optionally of an exact decoded byte length ({@code len} &gt;= 0). */
+    public static boolean isCanonicalB64u(Object s, int len) { return decodeB64uStrict(s, len) != null; }
+
+    public static boolean isCanonicalB64u(Object s) { return decodeB64uStrict(s, -1) != null; }
+
+    /** Strict-profile check of one number: an error text, or null when it is canonical on the wire. */
+    public static String strictNumberError(double v) {
+        if (Double.isNaN(v) || Double.isInfinite(v)) return "non-finite number";
+        if (v == 0 && 1 / v < 0) return "negative zero";
+        if (v == Math.rint(v)) return Math.abs(v) <= 9007199254740991.0 ? null : "integer outside the safe range (|n| > 2^53-1)";
+        if (Math.abs(v) < 1e-6) return "non-integer magnitude below 1e-6 (needs an exponent form; not representable in the canonical decimal form)";
+        String digits = Json.shortest(Math.abs(v)).toPlainString().replace(".", "").replaceFirst("^0+", "");
+        if (digits.length() > Json.MAX_DECIMAL_DIGITS) return "non-integer number has more than " + Json.MAX_DECIMAL_DIGITS + " significant digits";
+        return null;
+    }
+
+    /** The STRICT canonical bytes (what every protocol digest hashes); an out-of-profile value throws. Same as the internal digest input. */
+    public static byte[] canonicalBytesStrict(Object v) { return canonBytes(v); }
+
+    /** SERVER-ONLY lenient canonical text: it tolerates exponent and over-long numbers, so it must never feed a protocol digest. */
+    public static String canonicalizeLenientServerOnly(Object v) { return Json.canonicalize(v); }
+
+    /** UTF-8 bytes of {@link #canonicalizeLenientServerOnly}; server-only digests that no other verifier recomputes. */
+    public static byte[] canonicalBytesLenient(Object v) { return Json.canonicalize(v).getBytes(StandardCharsets.UTF_8); }
+
+    /** base64url(sha256(lenient canonical)); SERVER-ONLY. */
+    public static String hashCanonicalLenient(Object v) { return b64(sha(canonicalBytesLenient(v))); }
+
+    /** The b64u key / signature encoders of the reference ({@code encodeKey}, {@code decodeKey}, {@code encodeSig}, {@code decodeSig}). */
+    public static String encodeKey(byte[] key) { return b64(key); }
+    public static byte[] decodeKey(String s) { return Keys.unb64u(s); }
+    public static String encodeSig(byte[] sig) { return b64(sig); }
+    public static byte[] decodeSig(String s) { return Keys.unb64u(s); }
+
+    public static final String BUDGET_ALLOC_CAVEAT = "budget_alloc";
+
+    /** Builds the carried-allocation caveat {@code {type: "budget_alloc", limit}} for a delegation hop (B_sub: finite and >= 0 to be accepted). */
+    public static Map<String, Object> budgetAllocCaveat(double limit) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("type", BUDGET_ALLOC_CAVEAT);
+        m.put("limit", StoreJs.num(limit));
+        return m;
+    }
+
+    /** A {@code budget_alloc} caveat with a finite, non-negative numeric {@code limit}. */
+    public static boolean isBudgetAllocCaveat(Object cv) {
+        if (!(cv instanceof Map) || !"budget_alloc".equals(((Map<?, ?>) cv).get("type"))) return false;
+        Double d = Caveats.fin(((Map<?, ?>) cv).get("limit"));
+        return d != null && d >= 0;
+    }
+
+    /**
+     * The PCActn's {@code aud}, {@code iat} and {@code exp}, checked BEFORE any signature work or metering. These fields are
+     * unauthenticated here, so a pass proves nothing; a FAIL is final (the full verifier makes the same two decisions on the same
+     * fields). O(1). Returns null when both checks pass, else {@code {check: "audience"|"validity", reason}}.
+     */
+    public static Map<String, Object> pcactnCheapClaims(Map<String, Object> p, String audience, double now) {
+        Object aud = p == null ? null : p.get("aud");
+        if (!(aud instanceof String) || ((String) aud).isEmpty() || !aud.equals(audience)) return cheap("audience", "aud does not match this resource server / instance");
+        Object iatO = p.get("iat"), expO = p.get("exp");
+        if (!Json.isSafeInt(iatO) || !Json.isSafeInt(expO)) return cheap("validity", "iat and exp must be safe-integer epoch ms");
+        long iat = Json.asLong(iatO), exp = Json.asLong(expO);
+        if (now != Math.rint(now) || Math.abs(now) > 9007199254740991.0) return cheap("validity", "the verifier clock is not a safe integer epoch-ms");
+        if (!(exp > iat)) return cheap("validity", "exp must be greater than iat");
+        if (exp - iat > MAX_LIFETIME_MS) return cheap("validity", "lifetime exceeds " + MAX_LIFETIME_MS + " ms");
+        if (iat > now + MAX_SKEW_MS) return cheap("validity", "iat is in the future (clock skew)");
+        if (now > exp) return cheap("validity", "the PCActn has expired");
+        return null;
+    }
+
+    private static Map<String, Object> cheap(String check, String reason) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("check", check);
+        m.put("reason", reason);
+        return m;
+    }
+
+    /** What {@link #verifyChainCheap} reports: {@code ok} with {@code pqHops}, or a {@code reason}. */
+    public static final class CheapChain {
+        public final boolean ok;
+        public final int pqHops;
+        public final String reason;
+        CheapChain(boolean ok, int pqHops, String reason) { this.ok = ok; this.pqHops = pqHops; this.reason = reason; }
+    }
+
+    private static CheapChain cheapNo(String reason) { return new CheapChain(false, 0, reason); }
+
+    /**
+     * The CHEAP chain check for a gate that runs BEFORE authentication: only work that is cheap and a NECESSARY condition of
+     * {@link #verifyChain} (shape, caveat caps, depth, suite allowlist, body digest, parent links, issuer == parent holder, the root-issuer
+     * check, and the Ed25519 half of every hop that has one). No post-quantum verification and no PQ key resolution; a pure-PQ hop passes on
+     * structure alone. {@code ok} is NEVER an authentication: run {@link #verifyChain} before treating the chain as authentic.
+     * {@code pqHops} counts the hops that still need PQ verification.
+     */
+    public static CheapChain verifyChainCheap(List<Object> chain, String expectedRootIssuer, boolean haveIssuer, List<String> allowed) {
+        try {
+            if (chain == null || chain.isEmpty()) return cheapNo("empty chain");
+            if (chain.size() > MAX_CHAIN_HOPS) return cheapNo("chain too long (max " + MAX_CHAIN_HOPS + " hops)");
+            if (caveatLimitExceeded(chain)) return cheapNo(CAVEAT_LIMIT_REASON);
+            int pqHops = 0;
+            for (int i = 0; i < chain.size(); i++) {
+                String label = "hop " + i;
+                if (!wellTyped(chain.get(i))) return cheapNo(label + ": malformed capability");
+                Map<String, Object> c = asMap(chain.get(i));
+                boolean algPresent = c.containsKey("alg");
+                Object alg = c.get("alg");
+                String a = algPresent ? (String) alg : "ed25519";
+                if (!Pq.REGISTERED_SUITES.contains(a)) return cheapNo(label + ": unknown signature alg '" + a + "'");
+                boolean hasEd = a.equals("ed25519") || a.startsWith("hybrid-");
+                boolean needsPq = !a.equals("ed25519");
+                String suiteErr = suitePolicyError(alg, algPresent, label, allowed);
+                if (suiteErr != null) return cheapNo(suiteErr);
+                Map<String, Object> parent = i == 0 ? null : asMap(chain.get(i - 1));
+                if (i == 0) {
+                    if (c.containsKey("parent")) return cheapNo("hop 0: root must not have a parent");
+                    if (haveIssuer && !Objects.equals(c.get("issuer"), expectedRootIssuer)) return cheapNo("hop 0: root issuer is not the expected principal");
+                } else {
+                    if (!Objects.equals(c.get("parent"), capHash(parent))) return cheapNo(label + ": broken parent link");
+                    if (!Objects.equals(c.get("issuer"), parent.get("holder"))) return cheapNo(label + ": issuer is not the parent's bound holder");
+                }
+                String digest;
+                try {
+                    Map<String, Object> body = bodyOf(c);
+                    if (!a.equals("ed25519")) {
+                        body.put("alg", a);
+                        if (needsPq && c.get("pq_pk") instanceof String) body.put("pq_pk", c.get("pq_pk"));
+                    }
+                    digest = hashCanonical(body);
+                } catch (RuntimeException e) {
+                    return cheapNo(label + ": malformed body");
+                }
+                if (!digest.equals(asStr(c.get("body_digest"))) || !asStr(c.get("id")).equals(asStr(c.get("body_digest")))) return cheapNo(label + ": body digest mismatch");
+                if (hasEd) {
+                    String signer = i == 0 ? asStr(c.get("issuer")) : asStr(parent.get("holder"));
+                    byte[] raw = decodeB64uStrict(c.get("body_digest"), 32);
+                    if (raw == null || !verifyB64u(signer, concat(CAP_DOMAIN, raw), asStr(c.get("sig")))) return cheapNo(label + ": bad signature (not signed by expected key)");
+                }
+                if (needsPq) pqHops++;
+            }
+            return new CheapChain(true, pqHops, null);
+        } catch (RuntimeException e) {
+            return cheapNo("malformed capability chain: " + (e.getMessage() != null ? e.getMessage() : "unverifiable"));
+        }
+    }
+
+    /**
+     * The PQ verification key for a signature by {@code holder} (a chain leaf or threshold share) under suite {@code alg}: minted by the
+     * {@link Pq#resolvePqVerifyKey} choke point from the holder's {@code holder_pq} commitment. Null for ed25519, an unknown suite, and when the
+     * artifact's {@code pq_pk} is not the committed key (the signature check then fails closed). Natives never accept an unbound PQ key.
+     */
+    public static Pq.PinnedPq holderPqKey(Object alg, String holder, Object artifactPqPk, String holderPq) {
+        if (alg != null && !(alg instanceof String && Pq.REGISTERED_SUITES.contains(alg))) return null;
+        if (alg == null || "ed25519".equals(alg)) return null;
+        return Pq.resolvePqVerifyKey(holder, artifactPqPk, holderPq, null, null);
     }
 }
