@@ -19,6 +19,12 @@ import java.util.regex.Pattern;
 public final class ParamProvenance {
     private ParamProvenance() {}
 
+    /** Is {@code k} a well-formed pinned label key {@code {site, kid, pk, pq_pk?}}? */
+    public static boolean isLabelKey(Object k) {
+        return k instanceof Map && IntentArtifacts.closedMembers(IntentJs.obj(k), List.of("site", "kid", "pk"), List.of("pq_pk"), "label_key") == null
+            && IntentArtifacts.isBoundedString(IntentJs.get(k, "site"), 256) && IntentArtifacts.isBoundedString(IntentJs.get(k, "kid"), 64)
+            && IntentArtifacts.isDigest(IntentJs.get(k, "pk")) && IntentArtifacts.pinPqOk(k);
+    }
     public static final String LABELS_DOMAIN = "atlas-pca/labels/v1\0";
     public static final String LABELS_REF_DOMAIN = "atlas-pca/labels-ref/v1";
     public static final String LABEL_REF_PREFIX = "pca-labels:";
@@ -28,9 +34,9 @@ public final class ParamProvenance {
     public static final int MAX_PROV_REFS = 8;
     public static final int MAX_COMMITTED_LABELS = 16;
     static final Pattern PROV_PATH_RE = Pattern.compile("action\\.params\\.[A-Za-z0-9_]{1,64}");
-    private static final Set<String> PROTO_NAMES = Set.of("__proto__", "constructor", "prototype");
-    static final List<String> TAINT_LEVELS = List.of("trusted", "first_party", "tool", "web", "agent");
-    private static final List<String> MODES = List.of("allow", "question", "question_typed", "deny");
+    private static final Set<String> PROTO_NAMES = NullSafe.set(Set.of("__proto__", "constructor", "prototype"));
+    static final List<String> TAINT_LEVELS = NullSafe.list(List.of("trusted", "first_party", "tool", "web", "agent"));
+    private static final List<String> MODES = NullSafe.list(List.of("allow", "question", "question_typed", "deny"));
     private static final int TAINTED_RANK = 2;
 
     /** The rule-17 verdict. {@code labels}: classified path -> level; {@code classes}: path -> sorted class list; {@code env}: nested labels. */
@@ -144,9 +150,7 @@ public final class ParamProvenance {
         if (p.containsKey("label_keys")) {
             if (!(p.get("label_keys") instanceof List)) return "label_keys must be a list";
             for (Object k : (List<?>) p.get("label_keys"))
-                if (!(k instanceof Map) || IntentArtifacts.closedMembers(IntentJs.obj(k), List.of("site", "kid", "pk"), List.of("pq_pk"), "label_key") != null
-                    || !IntentArtifacts.isBoundedString(IntentJs.get(k, "site"), 256) || !IntentArtifacts.isBoundedString(IntentJs.get(k, "kid"), 64)
-                    || !IntentArtifacts.isDigest(IntentJs.get(k, "pk")) || !IntentArtifacts.pinPqOk(k)) return "every label key needs site, kid, a 32-byte pk and an optional string pq_pk";
+                if (!isLabelKey(k)) return "every label key needs site, kid, a 32-byte pk and an optional string pq_pk";
         }
         if (p.containsKey("critical_max") && !isTaintLevel(p.get("critical_max"))) return "critical_max must be a taint level";
         if (p.containsKey("material_tainted") && !isMode(p.get("material_tainted"))) return "material_tainted must be allow | question | question_typed | deny";

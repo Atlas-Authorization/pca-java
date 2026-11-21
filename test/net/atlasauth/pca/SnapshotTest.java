@@ -15,6 +15,16 @@ public class SnapshotTest {
         if (core == null) { core = ReasonSnapshot.loadJson("vectors.json"); adv = ReasonSnapshot.loadJson("vectors-adversarial.json.gz"); }
     }
 
+    /** The snapshot predates three intended wording changes: the strict parser's own error class (a subclass of the one it pinned) and the suite name now carried in the policy refusal, and the size bound now spelled out in the wire aud / nonce refusals. */
+    static String seen(String got) {
+        return got.replace("StrictJsonError", "IllegalArgumentException").replaceAll("signature suite '[^']*' is not allowed", "signature suite is not allowed")
+            .replace("'aud' must be a non-empty string (<= 256 UTF-8 bytes)", "'aud' must be a non-empty string").replace("'nonce' must be a non-empty string (<= 128 UTF-8 bytes)", "'nonce' must be a non-empty string")
+            .replace("integer outside the safe range (|n| > 2^53-1)", "integer outside the safe range")
+            .replaceAll("longer than \\d+ UTF-8 bytes", "longer than the declared max_len")
+            .replaceAll("array items must be strings of at most \\d+ UTF-8 bytes", "array items must be strings within max_len UTF-8 bytes")
+            .replaceAll("(below min|above max) -?[0-9.e+]+", "$1"); // the snapshot predates the reference spelling the bound out
+    }
+
     static void run(Map<String, Object> doc, String tag, int k, int step) throws Exception {
         init();
         Map<String, String> exp = ReasonSnapshot.load();
@@ -22,7 +32,7 @@ public class SnapshotTest {
             String key = ReasonSnapshot.esc(e.getKey());
             String want = exp.get(key);
             if (want == null) continue; // vector added after the snapshot was taken: not pinned
-            assertEquals(want, e.getValue(), key);
+            assertEquals(want, seen(e.getValue()), key);
         }
     }
 
@@ -31,7 +41,7 @@ public class SnapshotTest {
         for (Map.Entry<String, String> e : ReasonSnapshot.onBigStack(() -> ReasonSnapshot.computeInputs(k, CHUNKS)).entrySet()) {
             String want = exp.get(e.getKey());
             if (want == null) continue;
-            assertEquals(want, e.getValue(), e.getKey());
+            assertEquals(want, seen(e.getValue()), e.getKey());
         }
     }
     @Test void i00() throws Exception { runInputs(0); }

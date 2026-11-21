@@ -1,0 +1,55 @@
+name: Precheck
+
+# Compile-only gate, mvn test-compile (main and test sources) for the core library, every adapter and the example server.
+# Runs only on pre/** pushes (and by hand): it builds and typechecks everything, tests included, and runs no test.
+# Push pre/<version> first and the full ci/** run only when this is green.
+on:
+  push:
+    branches: ['pre/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  precheck:
+    name: compile main and test sources (no test runs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout (full shared corpus from the flagship)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # install -DskipTests compiles main and test sources and skips only the test run; the adapters resolve the core from the local repository
+      - name: Core library (main and test sources, installed for the adapters)
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q install -DskipTests
+      - name: Every adapter (test-compile)
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          set -euo pipefail
+          for pom in adapters/*/pom.xml; do
+            echo "::group::$pom"
+            mvn -B -ntp -q -f "$pom" test-compile
+            echo "::endgroup::"
+          done
+      - name: Example server
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          [ -f examples/spring-boot-server/pom.xml ] || { echo "skip (absent in this tree)"; exit 0; }
+          mvn -B -ntp -q -f examples/spring-boot-server/pom.xml test-compile

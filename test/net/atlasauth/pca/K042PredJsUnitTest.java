@@ -193,8 +193,10 @@ public class K042PredJsUnitTest {
         assertEquals(List.of("a", "alg", "pq_pk"), new ArrayList<>(b.keySet()));
         assertEquals(map("a", 1), base);
         Map<String, Object> np = IntentJs.bindSuiteFields(base, "ml-dsa-65", true, null, false);
-        assertEquals(map("a", 1, "alg", "ml-dsa-65"), np);
-        assertFalse(np.containsKey("pq_pk"));
+        // the reference assigns pq_pk unconditionally: an absent key is an undefined member, which has no strict canonical form (never a plain string)
+        assertEquals("ml-dsa-65", np.get("alg"));
+        assertTrue(np.containsKey("pq_pk"));
+        assertFalse(np.get("pq_pk") instanceof String);
         assertTrue(IntentJs.bindSuiteFields(base, "ml-dsa-65", true, null, true).containsKey("pq_pk"));
 
         assertNull(IntentJs.pin("id", 5));

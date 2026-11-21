@@ -414,7 +414,7 @@ public final class SafeRegex {
 
     /** {@code new RegExp('^(?:' + src + ')$').test(subject)} over the subset; null when refused or over budget. */
     public static Boolean fullMatch(String src, String subject) {
-        Compiled re = compile(src);
+        Compiled re = compileSafeRegexCached(src);
         if (re == null) return null;
         return run(re, subject);
     }
@@ -523,21 +523,55 @@ public final class SafeRegex {
     /** {@code Math.ceil(Math.log2(n))} for an integer n &gt;= 2, computed exactly. */
     static int ceilLog2(long n) { return 64 - Long.numberOfLeadingZeros(n - 1); }
 
-    // ---- per-document budget (regex-budget.ts) ----
-    /** One document's regex work budget. */
-    static final class Budget {
+    // ---- the regex work budget (regex-budget.ts) ----
+
+    /** A request-level budget allows this many documents' worth of regex work in total. */
+    public static final int REGEX_REQUEST_SCALE = 4;
+
+    /**
+     * A regex work budget. Two layers: a DOCUMENT budget (opened by every library entry point; fresh per document, so a verdict is a
+     * pure function of (document, subject)) and an optional REQUEST budget ({@link #request}, {@link #run}) opened by the server once per
+     * HTTP request: every document budget opened inside it also charges the request budget, whose caps are {@link #REGEX_REQUEST_SCALE}
+     * documents' worth. Outside any scope an evaluation is charged to a fresh single-use budget (never "unbudgeted").
+     */
+    public static final class Budget {
         int evaluations, chars;
         long steps;
         int refusals;
+        private final int scale;
+        private final Budget parent;
+        private final boolean isDocument;
+        private final String source;
 
-        boolean charge(String src, int subjectLen) {
-            Compiled c = compile(src);
+        /** A fresh document budget. */
+        public Budget() { this(1, null, true, null); }
+
+        private Budget(int scale, Budget parent, boolean isDocument, String source) {
+            this.scale = scale;
+            this.parent = parent;
+            this.isDocument = isDocument;
+            this.source = source;
+        }
+
+        /** A request-scoped budget; {@code source} (optional, the client key) owns the compiled patterns first seen in this request in the regex cache. */
+        public static Budget request(String source) { return new Budget(REGEX_REQUEST_SCALE, null, false, source); }
+
+        /** The enclosing budget this one also charges (null for a top-level budget). */
+        public Budget parentBudget() { return parent; }
+
+        /** The number of evaluations refused so far (a guard must treat a refusal as "could not decide", fail closed). */
+        public int refusals() { return refusals; }
+
+        /** Charge one evaluation of {@code src} against a subject of {@code subjectLen} code units; false = refused (the caller must NOT match). */
+        public boolean charge(String src, int subjectLen) {
+            Compiled c = compileSafeRegexCached(src);
             if (c == null) { refusals++; return false; }
             int ev = evaluations + 1;
             int ch = chars + src.length();
             long st = steps + (long) c.size() * (subjectLen + 1);
-            if (ev > MAX_REGEX_EVALUATIONS_PER_DOCUMENT || ch > MAX_REGEX_SOURCE_CHARS_PER_DOCUMENT || st > MAX_REGEX_STEPS_PER_DOCUMENT) {
-                evaluations = MAX_REGEX_EVALUATIONS_PER_DOCUMENT + 1; // poison: order-independent refusal
+            if (ev > (long) MAX_REGEX_EVALUATIONS_PER_DOCUMENT * scale || ch > (long) MAX_REGEX_SOURCE_CHARS_PER_DOCUMENT * scale
+                || st > MAX_REGEX_STEPS_PER_DOCUMENT * scale || (parent != null && !parent.charge(src, subjectLen))) {
+                evaluations = MAX_REGEX_EVALUATIONS_PER_DOCUMENT * scale + 1; // poison: order-independent refusal
                 refusals++;
                 return false;
             }
@@ -546,24 +580,163 @@ public final class SafeRegex {
             steps = st;
             return true;
         }
+
+        /** Make this the open scope for {@code fn} (the previous scope is restored afterwards). */
+        public <T> T run(java.util.function.Supplier<T> fn) {
+            Budget prev = CURRENT.get();
+            CURRENT.set(this);
+            try {
+                return fn.get();
+            } finally {
+                if (prev == null) CURRENT.remove(); else CURRENT.set(prev);
+            }
+        }
     }
 
     private static final ThreadLocal<Budget> CURRENT = new ThreadLocal<>();
+    private static volatile java.util.function.Supplier<Budget> provider;
 
-    /** Run {@code fn} inside the open document budget, or a fresh one when none is open (withRegexBudget). */
-    static <T> T withBudget(java.util.function.Supplier<T> fn) {
-        if (CURRENT.get() != null) return fn.get();
-        CURRENT.set(new Budget());
+    /**
+     * Install an AMBIENT request-budget provider (a server returns its per-request budget, for example from a request-scoped holder). Every
+     * document budget opened with no explicit enclosing scope chains to it, so a server can bound all regex work of a request without
+     * threading a budget through each call. {@code null} uninstalls.
+     */
+    public static void setRegexBudgetProvider(java.util.function.Supplier<Budget> fn) { provider = fn; }
+
+    private static Budget ambient() {
+        Budget cur = CURRENT.get();
+        if (cur != null) return cur;
         try {
-            return fn.get();
-        } finally {
-            CURRENT.remove();
+            java.util.function.Supplier<Budget> p = provider;
+            return p == null ? null : p.get();
+        } catch (RuntimeException e) {
+            return null;
         }
+    }
+
+    /**
+     * Run {@code fn} as ONE document: inside the open document scope when there is one (nested evaluators share the document's caps), else
+     * inside a fresh document budget chained to the enclosing request budget, if any (withRegexBudget).
+     */
+    static <T> T withBudget(java.util.function.Supplier<T> fn) {
+        Budget cur = CURRENT.get();
+        if (cur != null && cur.isDocument) return fn.get();
+        return new Budget(1, ambient(), true, null).run(fn);
+    }
+
+    /** {@link #withBudget} with an explicit budget: run {@code fn} inside it. */
+    public static <T> T withRegexBudget(java.util.function.Supplier<T> fn, Budget budget) {
+        return budget != null ? budget.run(fn) : withBudget(fn);
+    }
+
+    /** Regex evaluations refused so far by the open scope (0 when none is open): the reference's {@code regexRefusals}. */
+    static int refusals() {
+        Budget b = CURRENT.get();
+        return b == null ? 0 : b.refusals;
     }
 
     /** Charge one evaluation of {@code src} against a subject of {@code subjectLen} code units (chargeRegex). */
     static boolean charge(String src, int subjectLen) {
         Budget b = CURRENT.get();
-        return (b != null ? b : new Budget()).charge(src, subjectLen);
+        return (b != null ? b : new Budget(1, ambient(), true, null)).charge(src, subjectLen);
+    }
+
+    /** The source (client key) of the innermost open budget, walking document budgets up to the request budget. */
+    private static String currentRegexSource() {
+        for (Budget b = ambient(); b != null; b = b.parent) if (b.source != null) return b.source;
+        return null;
+    }
+
+    // ---- the ONE bounded cache of compiled programs (regex-cache.ts) ----
+
+    public static final int REGEX_CACHE_MAX_ENTRIES = 512;
+    public static final int REGEX_CACHE_MAX_PER_SOURCE = 64;
+    public static final int REGEX_CACHE_MAX_WEIGHT = 131_072;
+
+    private static final class CacheEntry {
+        final Compiled value;
+        final String source;
+        final int weight;
+        CacheEntry(Compiled value, String source, int weight) { this.value = value; this.source = source; this.weight = weight; }
+    }
+
+    private static final java.util.LinkedHashMap<String, CacheEntry> CACHE = new java.util.LinkedHashMap<>(); // least-recently-used first
+    private static final java.util.Map<String, java.util.LinkedHashSet<String>> BY_SOURCE = new java.util.HashMap<>();
+    private static int totalWeight;
+
+    /** SHA-256 over the UTF-16 code units, so the key is injective over strings (a lone surrogate is not folded to U+FFFD). */
+    private static String cacheKey(String src) {
+        byte[] b = new byte[src.length() * 2];
+        for (int i = 0; i < src.length(); i++) {
+            char c = src.charAt(i);
+            b[2 * i] = (byte) (c >> 8);
+            b[2 * i + 1] = (byte) c;
+        }
+        return Pca.b64(Pca.sha(b));
+    }
+
+    private static int compiledWeight(Compiled re) {
+        if (re == null) return 1;
+        int w = re.program.length;
+        for (Inst ins : re.program) if (ins.set != null) w += ins.set.ranges.length;
+        return w;
+    }
+
+    private static void cacheRemove(String key) {
+        CacheEntry e = CACHE.remove(key);
+        if (e == null) return;
+        totalWeight -= e.weight;
+        java.util.LinkedHashSet<String> owned = BY_SOURCE.get(e.source);
+        if (owned != null) {
+            owned.remove(key);
+            if (owned.isEmpty()) BY_SOURCE.remove(e.source);
+        }
+    }
+
+    /**
+     * {@link #compile} through the ONE bounded, per-source-admitted LRU. Never cleared wholesale; returns null for a pattern outside the
+     * subset (that verdict is cached too). A source owning {@link #REGEX_CACHE_MAX_PER_SOURCE} entries replaces its OWN least-recently-used
+     * one, so one client cannot flush the cache; a program heavier than 1/16 of the weight cap is used but never cached.
+     */
+    public static Compiled compileSafeRegexCached(String src) {
+        if (src == null) return null;
+        String key = cacheKey(src);
+        synchronized (CACHE) {
+            CacheEntry hit = CACHE.remove(key);
+            if (hit != null) {
+                CACHE.put(key, hit); // most recently used
+                java.util.LinkedHashSet<String> owned = BY_SOURCE.get(hit.source);
+                if (owned != null) { owned.remove(key); owned.add(key); }
+                return hit.value;
+            }
+        }
+        Compiled value = compile(src);
+        int w = Math.max(1, compiledWeight(value));
+        if (w > REGEX_CACHE_MAX_WEIGHT / 16) return value; // too heavy to cache: never evict others for it
+        String source = currentRegexSource();
+        if (source == null) source = "";
+        synchronized (CACHE) {
+            if (CACHE.containsKey(key)) return value;
+            for (java.util.LinkedHashSet<String> owned = BY_SOURCE.get(source); owned != null && owned.size() >= REGEX_CACHE_MAX_PER_SOURCE; owned = BY_SOURCE.get(source))
+                cacheRemove(owned.iterator().next());
+            while (CACHE.size() >= REGEX_CACHE_MAX_ENTRIES || totalWeight + w > REGEX_CACHE_MAX_WEIGHT) {
+                if (CACHE.isEmpty()) break;
+                cacheRemove(CACHE.keySet().iterator().next());
+            }
+            CACHE.put(key, new CacheEntry(value, source, w));
+            totalWeight += w;
+            BY_SOURCE.computeIfAbsent(source, k -> new java.util.LinkedHashSet<>()).add(key);
+        }
+        return value;
+    }
+
+    /** Whether pattern {@code src} is currently cached (tests and diagnostics). */
+    public static boolean regexCacheHas(String src) {
+        synchronized (CACHE) { return CACHE.containsKey(cacheKey(src)); }
+    }
+
+    /** Number of cached entries (tests and diagnostics). */
+    public static int regexCacheSize() {
+        synchronized (CACHE) { return CACHE.size(); }
     }
 }
