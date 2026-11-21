@@ -43,7 +43,8 @@ public final class LessNative {
 
     /** {@code n} is a signature length the parameter set produces. */
     public static boolean sigLenOk(int n) {
-        return n >= SIGNATURE_MIN_BYTES && n <= SIGNATURE_MAX_BYTES && (SIGNATURE_MAX_BYTES - n) % SIGNATURE_STEP_BYTES == 0;
+        int below = SIGNATURE_MAX_BYTES - n; // a produced length is MAX - k * STEP, at least MIN
+        return n >= SIGNATURE_MIN_BYTES && below >= 0 && below % SIGNATURE_STEP_BYTES == 0;
     }
 
     /** Candidate library paths, in order. */
@@ -125,8 +126,8 @@ public final class LessNative {
         try {
             Object arena = FFM.arenaOfConfined.invoke(null);
             try {
-                Object[] segs = new Object[3];
                 byte[][] in = {pk, msg.length == 0 ? new byte[1] : msg, sig};
+                Object[] segs = new Object[in.length];
                 for (int i = 0; i < 3; i++) {
                     segs[i] = FFM.arenaAllocate.invoke(arena, (long) in[i].length);
                     FFM.segCopyFrom.invoke(segs[i], FFM.segOfArray.invoke(null, (Object) in[i]));

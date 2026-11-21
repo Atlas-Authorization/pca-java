@@ -1,0 +1,1150 @@
+[
+ {
+  "file": "SafeRegex.java",
+  "method": "add",
+  "mutant": "RemoveIncrementsMutator: Removed increment -1",
+  "line": "int pc = stack[--sp];",
+  "proof": "`int pc = stack[--sp];` loses its decrement: sp never decreases, so `while (sp > 0)` (entered with sp == 1 after the first push) cannot end; each pass re-reads the same unpopped slot, marks it and either continues or pushes again. Unmutated, every pop shrinks sp and the closure ends after at most prog.length pops per call."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "isSafeSource",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (; j < src.length() && src.charAt(j) != ']'; j++) if (src.charAt(j) == '\\\\') j++;",
+  "proof": "the header j++ of the class scan `for (; j < src.length() && src.charAt(j) != ']'; j++)` is removed: j never advances, so for any class with a member before ']' (e.g. [a]) the loop re-tests the same character forever (no allocation). Unmutated j advances once per class character."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "isSafeSource",
+  "mutant": "RemoveIncrementsMutator: Removed increment 3",
+  "line": "i += 3;",
+  "proof": "`i += 3` after the group opener `(?:` is removed: i stays on '(', so the loop re-reads the same opener forever and pushes a new Frame on `stack` each pass (unbounded list growth, then the time-out). Unmutated i skips the three characters."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "isSafeSource",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "} else i += 1;",
+  "proof": "`else i += 1` after a plain '(' is removed: i stays on '(' so the loop re-reads it forever and `stack.add(new Frame())` grows the list without bound (MEMORY_ERROR). Unmutated i moves past the '('."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "isSafeSource",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "i++;",
+  "proof": "the final `i++` of the scan (a plain character) is removed: i never advances, so `while (i < src.length())` re-reads the same plain character forever (no allocation). Unmutated i advances per character."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "alt",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while (at(i) == '|') { i++; items.add(cat()); }",
+  "proof": "`i++` after '|' becomes i += 0: i stays on '|', cat() returns an empty Node at once (its loop stops on '|'), and `while (at(i) == '|')` holds again: items.add(...) forever, an unbounded list. Unmutated i moves past '|' and the loop ends when no further '|' follows."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "alt",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "while (at(i) == '|') { i++; items.add(cat()); }",
+  "proof": "`i++` after '|' becomes i--: i steps back onto the preceding alternative, cat() re-parses it and stops at the same '|' again, `at(i) == '|'` holds again, so items grows forever. Unmutated i moves forward past '|'."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "alt",
+  "mutant": "NegateConditionalsMutator: negated conditional",
+  "line": "while (at(i) == '|') { i++; items.add(cat()); }",
+  "proof": "`while (at(i) == '|')` becomes `!=`: at the end of the source at(i) is -1, never '|', so the loop runs on past the end for every pattern (cat() returns an empty Node, i keeps incrementing, items grows forever), including patterns with no '|' at all. Unmutated the loop body runs only on '|'."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "alt",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "while (at(i) == '|') { i++; items.add(cat()); }",
+  "proof": "the `at(i) == '|'` test of the while loop is removed (the body is always taken): i++ and items.add(cat()) run without end, adding an empty Node per pass (unbounded list). Unmutated the loop exits at the first non-'|'."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "alt",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "while (at(i) == '|') { i++; items.add(cat()); }",
+  "proof": "the i++ after '|' is removed: i stays on '|', cat() returns an empty Node immediately and the loop condition holds again: items grows forever. Unmutated i moves past '|'."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "case '.': i++; return set(new CharSet(LINE_TERMINATORS, true));",
+  "proof": "the '.' atom no longer advances (i += 0 / i++ removed): atom() returns without consuming '.', so cat() calls quantified() on the same '.' again and again, adding a Node per pass (unbounded list). Unmutated '.' is consumed once."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "i++;",
+  "proof": "the '$' atom no longer advances: cat() re-parses the same '$' forever, adding a Node per pass (unbounded list). Unmutated '$' is consumed once."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "NonVoidMethodCallMutator: removed call to net/atlasauth/pca/SafeRegex$Parser::cls",
+  "line": "case '[': return cls();",
+  "proof": "the call `cls()` is removed (null is returned) before the class is consumed: atom() returns null without advancing i, quantified() returns it, and cat() adds a null per pass forever (RUN_ERROR from the unbounded list). Unmutated cls() consumes the whole class."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "case '.': i++; return set(new CharSet(LINE_TERMINATORS, true));",
+  "proof": "the '.' atom no longer advances (i += 0 / i++ removed): atom() returns without consuming '.', so cat() calls quantified() on the same '.' again and again, adding a Node per pass (unbounded list). Unmutated '.' is consumed once."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "i++;",
+  "proof": "the '$' atom no longer advances: cat() re-parses the same '$' forever, adding a Node per pass (unbounded list). Unmutated '$' is consumed once."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "cat",
+  "mutant": "NonVoidMethodCallMutator: removed call to net/atlasauth/pca/SafeRegex$Parser::quantified",
+  "line": "while (i < s.length() && s.charAt(i) != '|' && s.charAt(i) != ')') items.add(quantified());",
+  "proof": "the call quantified() is removed: nothing is consumed, i stays put, and `while (i < s.length() && ...)` keeps adding a null item forever (unbounded list). Unmutated each pass consumes at least one character."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "escapeInner",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "i += 2;",
+  "proof": "after the two hex digits of \\xHH, `i += 2` becomes i -= 2: i lands on the backslash of the same escape, which is parsed again and again, adding a Node per pass (unbounded list). Unmutated i ends after the digits."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "quantified",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "if (c == '*') { min = 0; max = Double.POSITIVE_INFINITY; i++; }",
+  "proof": "after '*' (or '?') `i++` becomes i--: i steps back onto the atom just parsed, cat() re-parses and re-quantifies it, the quantifier moves i back again, so items grows forever for every quantified pattern. Unmutated i moves past the quantifier."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "quantified",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "else if (c == '?') { min = 0; max = 1; i++; }",
+  "proof": "after '?' `i++` becomes i--: i steps back onto the atom just parsed, cat() re-parses and re-quantifies it, so items grows forever for every pattern with a '?' quantifier. Unmutated i moves past the quantifier."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "quantified",
+  "mutant": "NonVoidMethodCallMutator: removed call to net/atlasauth/pca/SafeRegex$Parser::atom",
+  "line": "Node atom = atom();",
+  "proof": "the call atom() is removed: atom is null and nothing is consumed (i unchanged), so cat() adds a null per pass forever (unbounded list). Unmutated atom() consumes at least one character."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "readAtom",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "i++;",
+  "proof": "a plain class character no longer advances (i++ removed / i += 0): readAtom() returns the same character for ever, and the class loop in cls() adds a range per pass without end (unbounded growth). Unmutated each class character is consumed once."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "readAtom",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "i++;",
+  "proof": "a plain class character no longer advances (i++ removed / i += 0): readAtom() returns the same character for ever, and the class loop in cls() adds a range per pass without end (unbounded growth). Unmutated each class character is consumed once."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseStartTag",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "while (j < rest.length() && !isXmlSpace(rest.charAt(j)) && rest.charAt(j) != '/' && rest.charAt(j) != '>') j++;",
+  "proof": "the name scan `while (j < rest.length() && ... ) j++;` no longer advances: j stays on the first name character forever (no allocation), for every start tag. Unmutated j reaches the end of the name."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseXml",
+  "mutant": "InlineConstantMutator: Substituted 60 with 61",
+  "line": "if (s.charAt(i) != '<') {",
+  "proof": "the document loop's text-vs-markup test is broken so that '<' is taken as text (60 -> 61 compares with '='; charAt removed gives 0; the equality test forced): text branch `end = s.indexOf('<', i)` returns i itself, so i = end does not advance and, at the top level (cur == null), the empty text passes the whitespace check and `continue`s: an endless loop (no allocation) for every document, since each starts with '<'. Unmutated '<' goes to the markup branches."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseXml",
+  "mutant": "NonVoidMethodCallMutator: removed call to java/lang/String::charAt",
+  "line": "if (s.charAt(i) != '<') {",
+  "proof": "the document loop's text-vs-markup test is broken so that '<' is taken as text (60 -> 61 compares with '='; charAt removed gives 0; the equality test forced): text branch `end = s.indexOf('<', i)` returns i itself, so i = end does not advance and, at the top level (cur == null), the empty text passes the whitespace check and `continue`s: an endless loop (no allocation) for every document, since each starts with '<'. Unmutated '<' goes to the markup branches."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseXml",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "if (s.charAt(i) != '<') {",
+  "proof": "the document loop's text-vs-markup test is broken so that '<' is taken as text (60 -> 61 compares with '='; charAt removed gives 0; the equality test forced): text branch `end = s.indexOf('<', i)` returns i itself, so i = end does not advance and, at the top level (cur == null), the empty text passes the whitespace check and `continue`s: an endless loop (no allocation) for every document, since each starts with '<'. Unmutated '<' goes to the markup branches."
+ },
+ {
+  "file": "AttestV8Json.java",
+  "method": "number",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while (isDigit(peek())) pos++;",
+  "proof": "in `while (isDigit(peek())) pos++;` the pos++ no longer advances: a leading digit 1-9 stays under the cursor forever (no allocation). Unmutated pos moves past each digit."
+ },
+ {
+  "file": "AttestV8Json.java",
+  "method": "number",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable pos",
+  "line": "while (isDigit(peek())) pos++;",
+  "proof": "in `while (isDigit(peek())) pos++;` the pos++ no longer advances: a leading digit 1-9 stays under the cursor forever (no allocation). Unmutated pos moves past each digit."
+ },
+ {
+  "file": "AttestV8Json.java",
+  "method": "str",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "pos++;",
+  "proof": "in the string scan the plain-character `pos++` no longer advances: the first ordinary character of any string is re-read forever (no allocation). Unmutated pos moves past each character."
+ },
+ {
+  "file": "AttestV8Json.java",
+  "method": "str",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable pos",
+  "line": "pos++;",
+  "proof": "in the string scan the plain-character `pos++` no longer advances: the first ordinary character of any string is re-read forever (no allocation). Unmutated pos moves past each character."
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "the constant 1 of `while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }` becomes 0; the survivors of this constant that do not hang (mask 0: `(fn & 0) == 1` is never true; compare 0) are killed by K05R6DALedgerTest.genuineProofsVerifyInThisOrder; the shift-by-zero variants make `fn >>= 0; sn >>= 0;` change nothing, so for an odd fn (an even old size) the loop never ends (no allocation). Unmutated the shifts strip the trailing 1 bits."
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }",
+  "proof": "the constants 1 of `while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }` become 0 (the 2 variants are killed by K05R6DALedgerTest): a zero mask makes `(fn & 0) == 0` always true, and a zero shift leaves fn unchanged, so once the branch is entered with an even fn the loop never ends (no allocation). Unmutated fn >>= 1 reaches an odd value."
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "MathMutator: Replaced Shift Right with Shift Left",
+  "line": "while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }",
+  "proof": "`fn >>= 1; sn >>= 1` becomes `<<=`: an even fn stays even as it doubles (and becomes 0 after 63 doublings), so `(fn & 1) == 0` holds forever. Unmutated the shift reaches the lowest set bit."
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "RemoveConditionalMutator_EQUAL_ELSE: removed conditional - replaced equality check with false",
+  "line": "if (sn == 0) return false;",
+  "proof": "the `if (sn == 0) return false;` early return is skipped: sn reaches 0 inside the loop only when the proof has more nodes than the walk consumed (a valid proof ends with sn == 0 after its last node); the walk then has fn == sn == 0, `fn == sn` selects the branch whose `while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }` never ends because 0 >> 1 == 0 (no allocation). Every input on which the mutant differs from the unmutated verdict therefore hangs it; valid proofs never reach sn == 0 inside the loop."
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "the loop test of `while ((fn & 1) == 1)` is removed so the body runs unconditionally: fn >>= 1 reaches 0 (or stays -1) and the loop never exits, for every proof that reaches this line (any 0 < oldSize < newSize). Unmutated it stops at the first even fn."
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }",
+  "proof": "the loop test of `while ((fn & 1) == 0)` is removed so the body runs unconditionally: fn >>= 1 reaches 0 and stays there, the loop never exits, whenever the branch is entered (every non-trivial proof). Unmutated it stops at the first odd fn."
+ },
+ {
+  "file": "Json.java",
+  "method": "number",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "else if (c >= '1' && c <= '9') { while (i < s.length() && dig(s.charAt(i))) i++; }",
+  "proof": "in `while (i < s.length() && dig(s.charAt(i))) i++;` the i++ no longer advances: a digit stays under the cursor and the loop never ends (no allocation). Unmutated i moves past each digit."
+ },
+ {
+  "file": "Json.java",
+  "method": "number",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while (i < s.length() && dig(s.charAt(i))) i++;",
+  "proof": "in the fraction digit loop the i++ no longer advances: a digit after '.' stays under the cursor forever (no allocation). Unmutated i moves past each digit. || in the exponent digit loop the i++ no longer advances: a digit after 'e' stays under the cursor forever (no allocation). Unmutated i moves past each digit."
+ },
+ {
+  "file": "Json.java",
+  "method": "number",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "else if (c >= '1' && c <= '9') { while (i < s.length() && dig(s.charAt(i))) i++; }",
+  "proof": "in `while (i < s.length() && dig(s.charAt(i))) i++;` the i++ no longer advances: a digit stays under the cursor and the loop never ends (no allocation). Unmutated i moves past each digit."
+ },
+ {
+  "file": "Json.java",
+  "method": "number",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "while (i < s.length() && dig(s.charAt(i))) i++;",
+  "proof": "in the fraction digit loop the i++ no longer advances: a digit after '.' stays under the cursor forever (no allocation). Unmutated i moves past each digit. || in the exponent digit loop the i++ no longer advances: a digit after 'e' stays under the cursor forever (no allocation). Unmutated i moves past each digit."
+ },
+ {
+  "file": "Json.java",
+  "method": "shortest",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int p = 1; ; p++) {",
+  "proof": "`for (int p = 1; ; p++)` keeps p == 1 (increment removed): each pass rounds x to one significant digit and the loop ends only if one digit already reads back as the double. Any double needing two or more digits (0.1 + 0.2, 1.5, 123) never satisfies okLo/okHi at p == 1 and spins forever (BigDecimal temporaries only). Unmutated p grows until the shortest round-trip precision (at most 17)."
+ },
+ {
+  "file": "Json.java",
+  "method": "string",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "char c = s.charAt(i++);",
+  "proof": "`char c = s.charAt(i++)` no longer advances: `while (true)` re-reads the first character after the opening quote and appends it to the StringBuilder on every pass (a backslash re-reads itself as its own escape and appends too), so memory grows until the JVM fails (RUN_ERROR); only `\"\"` and a control character leave the loop at once, and they behave as unmutated. Unmutated i advances per character."
+ },
+ {
+  "file": "Json.java",
+  "method": "string",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "char c = s.charAt(i++);",
+  "proof": "`char c = s.charAt(i++)` no longer advances: `while (true)` re-reads the first character after the opening quote and appends it to the StringBuilder on every pass (a backslash re-reads itself as its own escape and appends too), so memory grows until the JVM fails (RUN_ERROR); only `\"\"` and a control character leave the loop at once, and they behave as unmutated. Unmutated i advances per character."
+ },
+ {
+  "file": "Json.java",
+  "method": "ws",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "if (c == ' ' || c == '\\t' || c == '\\n' || c == '\\r') i++; else break;",
+  "proof": "the whitespace skip `if (c == ' ' || ...) i++; else break;` no longer advances: the first whitespace character is re-read forever by `while (i < s.length())` (no allocation). Unmutated i passes each whitespace character."
+ },
+ {
+  "file": "Json.java",
+  "method": "ws",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "if (c == ' ' || c == '\\t' || c == '\\n' || c == '\\r') i++; else break;",
+  "proof": "the whitespace skip `if (c == ' ' || ...) i++; else break;` no longer advances: the first whitespace character is re-read forever by `while (i < s.length())` (no allocation). Unmutated i passes each whitespace character."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "isSafeSource",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "for (; j < src.length() && src.charAt(j) != ']'; j++) if (src.charAt(j) == '\\\\') j++;",
+  "proof": "the line holds two increments. If the mutated one is the header j++ (now j--), the input [a] makes j fall to -1 and src.charAt(-1) throws, which K05R6DAParseTest.plainCharactersAndClassesPassTheGuard fails on (a kill, no hang). If it is the escape skip `if (src.charAt(j) == '\\\\') j++` (now j--), then j-- followed by the header j++ returns to the same backslash, so any class containing a backslash loops forever with no allocation, while unmutated the backslash skips its escaped character."
+ },
+ {
+  "file": "IntentAcc.java",
+  "method": "monitorStates",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (long i = 1; i <= w; i++) out.add(\"pending:\" + i);",
+  "proof": "Mechanism: the loop condition 'i <= w' is replaced by constant true (comparison removed), and the body only appends to the list; nothing in the body or the update can leave the loop, so out.add(\"pending:\" + i) runs forever and the list grows until heap exhaustion for every responds_within monitor (even within 1). Unmutated, the loop runs w times (w <= 3 in the oracle cases rw0..rw3 and IntentV2KillTest)."
+ },
+ {
+  "file": "IntentMap.java",
+  "method": "split",
+  "mutant": "MathMutator: Replaced long multiplication with division",
+  "line": "private static long split(long n) { long k = 1; while (k * 2 < n) k *= 2; return k; }",
+  "proof": "Mechanism: split computes the largest power of two below n with 'long k = 1; while (k * 2 < n) k *= 2;'. The dead variant replaces the body's 'k *= 2' by 'k /= 2': from k = 1 this gives k = 0, and then 0 * 2 < n holds for every n >= 1, so the while never exits (a spin, no allocation). It is reached by every commitment over 3 or more leaves (IntentMapKillTest.commitmentMatchesTheReferenceShape builds 14 leaves). Unmutated the loop runs at most log2(n) <= 4 times there. (The variant that divides in the condition instead terminates with a wrong split and is caught by the same test's commitment comparison.)"
+ },
+ {
+  "file": "IntentMap.java",
+  "method": "split",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "private static long split(long n) { long k = 1; while (k * 2 < n) k *= 2; return k; }",
+  "proof": "Mechanism: the loop condition 'k * 2 < n' is replaced by constant true, so 'k *= 2' runs forever: k doubles 1, 2, 4 ... 2^62, then 2^63 wraps to Long.MIN_VALUE and 2^64 to 0, after which k *= 2 stays 0 and the loop never exits (a spin, no allocation). Every commitment over 3+ leaves reaches it; unmutated the loop runs log2(n) <= 4 times (14 leaves in IntentMapKillTest)."
+ },
+ {
+  "file": "IntentMap.java",
+  "method": "u64be",
+  "mutant": "RemoveIncrementsMutator: Removed increment -1",
+  "line": "for (int i = 7; i >= 0; i--) { out[i] = (byte) (n & 0xff); n >>>= 8; }",
+  "proof": "Mechanism: u64be's loop 'for (int i = 7; i >= 0; i--)' loses its decrement (RemoveIncrementsMutator), so i stays 7 and the test i >= 0 holds forever; the body only rewrites out[7] and shifts n, so it spins forever without allocating. Every commitOf call (every map commitment, IntentMapKillTest) reaches it; unmutated it runs exactly 8 times."
+ },
+ {
+  "file": "Predicates.java",
+  "method": "globMatch",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "starTi = ++ti;",
+  "proof": "Mechanism: in globMatch the star branch 'starTi = ++ti; starSi = si;' loses the ++ so ti is not advanced past the STAR token: on the next pass of 'while (si < s.length())' toks[ti] is still the STAR, the same branch runs again, si never advances and the loop spins forever (any glob containing '*' that is matched, e.g. 'a*b'). Unmutated each token is consumed once, so the loop runs at most |s| + backtracks times on the short subjects the tests use."
+ },
+ {
+  "file": "Predicates.java",
+  "method": "globMatch",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "si = ++starSi;",
+  "proof": "Mechanism: the backtracking branch 'ti = starTi; si = ++starSi;' loses the ++, so after a mismatch si is reset to the same starSi every time; the same token mismatches again at the same position and the branch repeats forever (a spin). It is reached by any glob with '*' whose first attempt fails, e.g. 'a*b' against 'axxc'. Unmutated starSi grows by one per backtrack, bounded by |s| (subjects of a few characters in the tests)."
+ },
+ {
+  "file": "Predicates.java",
+  "method": "globMatch",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "while (ti < toks.length && toks[ti][0] == STAR) ti++;",
+  "proof": "Mechanism: the trailing loop 'while (ti < toks.length && toks[ti][0] == STAR) ti++' loses its ti++, so once the subject is consumed and the next token is a STAR (e.g. glob 'a*' against 'a', or '*' against '') the condition stays true forever (a spin). Unmutated it skips the trailing stars (at most the number of tokens, 1 here) and returns."
+ },
+ {
+  "file": "Predicates.java",
+  "method": "parseGlob",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "i++;",
+  "proof": "Mechanism: in parseGlob the escape branch 'out.add(new int[]{LIT, glob.charAt(i + 1)}); i++;' has i++ changed to i--, and the enclosing for loop adds its own i++, so the index returns to the backslash itself; the same escape is parsed again forever, adding a token each time (heap exhaustion). Any glob with a backslash escape (e.g. '\\\\*a') reaches it; unmutated the index advances by 2 per escape."
+ },
+ {
+  "file": "StepUpClient.java",
+  "method": "base",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while (s.endsWith(\"/\")) s = s.substring(0, s.length() - 1);",
+  "proof": "Mechanism: base() strips trailing slashes with 'while (s.endsWith(\"/\")) s = s.substring(0, s.length() - 1)'. The constant 1 is replaced by 0, so substring(0, length) returns the same string and endsWith(\"/\") stays true forever (a spin) for every step-up URL that ends with '/' (tests use such URLs, e.g. 'http://h/'). Unmutated each pass removes one slash, so the loop runs once per trailing slash (1-3)."
+ },
+ {
+  "file": "StepUpClient.java",
+  "method": "base",
+  "mutant": "NakedReceiverMutator: replaced call to java/lang/String::substring with receiver",
+  "line": "while (s.endsWith(\"/\")) s = s.substring(0, s.length() - 1);",
+  "proof": "Mechanism: the call s.substring(0, s.length() - 1) is replaced by its receiver s, so the loop 'while (s.endsWith(\"/\")) s = s' never changes s and spins forever for every URL ending in '/'. Unmutated each pass drops one slash (1-3 passes in the tests)."
+ },
+ {
+  "file": "AttestNvidiaOcsp.java",
+  "method": "inOrder",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "while (i < tags.length && tags[i] != k.tag) i++;",
+  "proof": "Mechanism: inOrder scans 'while (i < tags.length && tags[i] != k.tag) i++' to find the part's tag among the allowed tags; with the i++ removed, a part whose tag differs from tags[i] (e.g. an optional leading [0] element absent, so the first part is tags[1]) leaves the condition true forever (a spin). Unmutated i advances at most tags.length (<= 3) times."
+ },
+ {
+  "file": "AttestIntelCollateral.java",
+  "method": "evaluateTcb",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = from; i < 16; i++) if ((teeTcbSvn[i] & 0xff) < tdx[i]) match = false;",
+  "proof": "Mechanism: in evaluateTcb the loop 'for (int i = from; i < 16; i++) if (teeTcbSvn[i] ... < tdx[i]) match = false' loses its increment, so i stays at from (0 or 2) and the test i < 16 holds forever; the body only clears a flag, so it spins without allocating. Every TCB level evaluation reaches it; unmutated it runs 16 - from iterations."
+ },
+ {
+  "file": "AttestCommon.java",
+  "method": "attestationBindingBytes",
+  "mutant": "IncrementsMutator: Changed increment from -1 to 1",
+  "line": "for (int i = 7; i >= 0; i--) buf.write((int) (ep >>> (8 * i)) & 0xff);",
+  "proof": "Mechanism: in attestationBindingBytes the epoch loop 'for (int i = 7; i >= 0; i--) buf.write(...)' has i-- changed to i++, so i = 7, 8, 9, ... never becomes negative until int overflow after ~2^31 iterations, each writing one byte to the ByteArrayOutputStream, which exhausts the heap long before. Unmutated it writes exactly 8 bytes (every binding computation)."
+ },
+ {
+  "file": "AttestCommon.java",
+  "method": "attestationBindingBytes",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 7; i >= 0; i--) buf.write((int) (ep >>> (8 * i)) & 0xff);",
+  "proof": "Mechanism: the loop test 'i >= 0' is replaced by constant true, so after i reaches 0 the decrement continues -1, -2, ... down to Integer.MIN_VALUE (~2^31 iterations), each iteration appending a byte to the ByteArrayOutputStream, which exhausts the heap. Unmutated the loop runs 8 times."
+ },
+ {
+  "file": "AttestCommon.java",
+  "method": "attestationBindingBytes",
+  "mutant": "RemoveIncrementsMutator: Removed increment -1",
+  "line": "for (int i = 7; i >= 0; i--) buf.write((int) (ep >>> (8 * i)) & 0xff);",
+  "proof": "Mechanism: the decrement of 'for (int i = 7; i >= 0; i--)' is removed, so i stays 7 and each pass appends a byte to the ByteArrayOutputStream forever (heap exhaustion). Unmutated it runs 8 times."
+ },
+ {
+  "file": "AttestCommon.java",
+  "method": "checkAzureRuntimeDataBinding",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = 32; i < 64; i++) if (reportData[i] != 0) return \"report_data[32:64] is not zero (not an Azure runtime-data hash)\";",
+  "proof": "Mechanism: 'for (int i = 32; i < 64; i++) if (reportData[i] != 0) return ...' loses i++, so for a valid Azure report_data (bytes 32..63 zero) reportData[32] == 0 forever and the loop spins without allocating. Unmutated it checks 32 bytes and falls through."
+ },
+ {
+  "file": "AttestIntel.java",
+  "method": "extractPckFmspcAndTcb",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int b = val.start; b < val.end; b++) n = n << 8 | (leaf[b] & 0xff);",
+  "proof": "Mechanism: in extractPckFmspcAndTcb the integer-value loop 'for (int b = val.start; b < val.end; b++) n = n << 8 | leaf[b]' loses b++, so for any INTEGER with content (val.end > val.start) b stays at start and the loop spins (n shifts forever). Unmutated it runs val.end - val.start (<= 4) times per integer."
+ },
+ {
+  "file": "AttestIntel.java",
+  "method": "verifyGenuineTdxQuote",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = QE_RDATA_OFF + 32; i < SGX_REPORT; i++) if (q.qeReportBody[i] != 0) zero = false;",
+  "proof": "Mechanism: the QE report_data tail check 'for (int i = QE_RDATA_OFF + 32; i < SGX_REPORT; i++) if (q.qeReportBody[i] != 0) zero = false' loses i++, so i never reaches SGX_REPORT and the loop spins forever on a valid quote (the test quotes have the tail zero or not; either way no exit). Unmutated it runs SGX_REPORT - (QE_RDATA_OFF + 32) = 32 iterations."
+ },
+ {
+  "file": "AttestIntel.java",
+  "method": "verifyIntelPckChain",
+  "mutant": "NonVoidMethodCallMutator: removed call to net/atlasauth/pca/AttestIntel::k",
+  "line": "for (AttCert cur = leaf; cur != null && !seen.contains(k(cur.rawSubject)); ) {",
+  "proof": "Mechanism: 'for (AttCert cur = leaf; cur != null && !seen.contains(k(cur.rawSubject)); )' ends the walk when the next certificate was already seen (a self-issued root maps back to its own subject: cur = bySubject.get(k(cur.rawIssuer))). The PCK chains in AttestIntelK05KillTest.pckChainOutcomes end in a self-issued root, so with the k(...) call removed from the seen-test the argument is null, seen.contains(null) is false forever (only real subjects are added), so at the root the walk goes round the same certificate forever, adding it to 'ordered' each time (heap exhaustion). Unmutated the walk ends after at most 3 certificates."
+ },
+ {
+  "file": "AttestIntel.java",
+  "method": "verifyIntelPckChain",
+  "mutant": "NonVoidMethodCallMutator: removed call to java/util/Set::contains",
+  "line": "for (AttCert cur = leaf; cur != null && !seen.contains(k(cur.rawSubject)); ) {",
+  "proof": "Mechanism: 'for (AttCert cur = leaf; cur != null && !seen.contains(k(cur.rawSubject)); )' ends the walk when the next certificate was already seen (a self-issued root maps back to its own subject: cur = bySubject.get(k(cur.rawIssuer))). The PCK chains in AttestIntelK05KillTest.pckChainOutcomes end in a self-issued root, so with Set.contains removed (reads false) the cycle test never fires, so the walk loops on the self-issued root forever, appending to 'ordered' (heap exhaustion). Unmutated it ends after at most 3 certificates."
+ },
+ {
+  "file": "AttestIntel.java",
+  "method": "verifyIntelPckChain",
+  "mutant": "NonVoidMethodCallMutator: removed call to net/atlasauth/pca/AttestIntel::k",
+  "line": "seen.add(k(cur.rawSubject));",
+  "proof": "Mechanism: the walk 'ordered.add(cur); seen.add(k(cur.rawSubject))' marks visited subjects; with the k(...) call removed from the add, seen receives null instead of the subject, so the test seen.contains(k(subject)) at the next pass never finds it, and the self-issued root of the PCK chains (pckChainOutcomes) is visited forever, appending to 'ordered' each time (heap exhaustion). Unmutated the walk ends after at most 3 certificates."
+ },
+ {
+  "file": "AttestIntel.java",
+  "method": "verifyIntelPckChain",
+  "mutant": "NonVoidMethodCallMutator: removed call to java/util/Set::add",
+  "line": "seen.add(k(cur.rawSubject));",
+  "proof": "Mechanism: with seen.add removed, 'seen' stays empty, so '!seen.contains(...)' is always true and the walk loops on the self-issued root of every PCK chain forever, appending to 'ordered' (heap exhaustion). Unmutated the walk ends after at most 3 certificates."
+ },
+ {
+  "file": "AttestIntel.java",
+  "method": "verifyIntelPckChain",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "for (AttCert cur = leaf; cur != null && !seen.contains(k(cur.rawSubject)); ) {",
+  "proof": "Mechanism: the dead variant forces the loop-continuation test to pass (the seen-contains test is skipped), so the walk never stops at the already-seen self-issued root of the PCK chains (pckChainOutcomes) and appends it to 'ordered' forever (heap exhaustion). Unmutated it stops after at most 3 certificates. (The variant forcing the cur != null test would throw NullPointerException instead and is a separate run error.)"
+ },
+ {
+  "file": "AttestDer.java",
+  "method": "readCertRoleInfo",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = pl.start; i < pl.end; i++) n = (n << 8) | (cert[i] & 0xff);",
+  "proof": "Mechanism: readCertRoleInfo's pathLenConstraint loop 'for (int i = pl.start; i < pl.end; i++) n = (n << 8) | cert[i]' loses i++, so for any INTEGER with at least one byte i stays at start and the loop spins. Unmutated it runs pl.end - pl.start (1-2) times."
+ },
+ {
+  "file": "AttestAmd.java",
+  "method": "nonZero",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = from; i < to; i++) if (b[i] != 0) return true;",
+  "proof": "Mechanism: nonZero's loop 'for (int i = from; i < to; i++) if (b[i] != 0) return true' loses i++, so for an all-zero region b[from] == 0 forever and it spins. Unmutated it scans to - from bytes (<= 72) and returns false."
+ },
+ {
+  "file": "AttestAmd.java",
+  "method": "verifySnpReportSignature",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = 48; i < 72; i++) if (r.sigR[i] != 0 || r.sigS[i] != 0) return false;",
+  "proof": "Mechanism: verifySnpReportSignature's range check 'for (int i = 48; i < 72; i++) if (r.sigR[i] != 0 || r.sigS[i] != 0) return false' loses i++, so for a well-formed signature (those bytes zero) it spins forever at i = 48. Unmutated it checks 24 bytes."
+ },
+ {
+  "file": "AttestNvidia.java",
+  "method": "stripTrailingNul",
+  "mutant": "RemoveIncrementsMutator: Removed increment -1",
+  "line": "while (e > 0 && s.charAt(e - 1) == '\\0') e--;",
+  "proof": "Mechanism: stripTrailingNul's 'while (e > 0 && s.charAt(e - 1) == '\\0') e--' loses e--, so for a string with a trailing NUL e never decreases and the loop spins. Unmutated e decreases once per trailing NUL (1-3 in the tests)."
+ },
+ {
+  "file": "Actions.java",
+  "method": "packProof",
+  "mutant": "NakedReceiverMutator: replaced call to java/util/List::subList with receiver",
+  "line": "if (idx < k) { step.put(\"side\", \"R\"); step.put(\"hash\", Pca.b64(Pca.build(seg.subList(k, seg.size())))); seg = new ArrayList<>(seg.subList(0, k)); }",
+  "proof": "Mechanism: packProof's 'while (seg.size() > 1)' halves the segment each pass with 'seg = new ArrayList<>(seg.subList(0, k))'; the call subList(0, k) is replaced by its receiver, so seg keeps its full size and the loop condition stays true forever while every pass adds a {side,hash} step to 'path' (heap exhaustion). Reached by every pack with 2+ digests (ActionVectorsTest.pinnedDigests); unmutated the loop runs ceil(log2(size)) times (<= 3)."
+ },
+ {
+  "file": "IntentJs.java",
+  "method": "u8len",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "else if (Character.isHighSurrogate(c) && i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1))) { n += 4; i++; }",
+  "proof": "Mechanism: u8len's surrogate-pair branch '{ n += 4; i++; }' has i++ changed to i--; together with the for loop's own i++ the index returns to the high surrogate, which is counted again forever (n overflows, no exit). Any string with a valid pair (emoji tests) reaches it. Unmutated the index skips the low surrogate."
+ },
+ {
+  "file": "ProvenanceGate.java",
+  "method": "verifyRfc9162Inclusion",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "fn >>= 1;",
+  "proof": "Mechanism: in verifyRfc9162Inclusion the inner shift 'fn >>= 1; sn >>= 1' has its constant 1 replaced by 0 (fn >>= 0), so inside 'while ((fn & 1) == 0 && fn != 0)' fn is never shifted and stays even and non-zero forever (a spin). It is entered whenever fn is even at a step with fn == sn (even-index leaf of a non-power-of-two tree, covered by the inclusion vectors). Unmutated each pass halves fn, ending at its lowest set bit (<= 3 passes)."
+ },
+ {
+  "file": "MissingContext.java",
+  "method": "bindContext",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 1; i < segs.length; i++) {   // from 1: a bound top-level env / subject / action that is not an object blocks too",
+  "proof": "Mechanism: bindContext's prefix walk 'for (int i = 1; i < segs.length; i++)' has the comparison replaced by constant true, so i grows without bound; each pass builds Arrays.copyOfRange(segs, 0, i) (padded with nulls past the end) and joins it, so the work and memory per pass grow with i until heap exhaustion. Any supplied leaf that is not already bound (e.g. env.a.b) reaches it; unmutated it runs segs.length - 1 (<= 3) times."
+ },
+ {
+  "file": "Obligations.java",
+  "method": "outcome",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "for (int i = 0; i < list.size(); i++) all.add(i);",
+  "proof": "Mechanism: outcome()'s overdue list is built by 'for (int i = 0; i < list.size(); i++) all.add(i)'; i++ changed to i-- gives 0, -1, -2, ... all < list.size(), so the loop never ends and 'all' grows without bound (heap exhaustion). It is reached for any malformed input with a non-empty obligation list; unmutated it adds list.size() (<= a few) entries."
+ },
+ {
+  "file": "Obligations.java",
+  "method": "outcome",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 0; i < list.size(); i++) all.add(i);",
+  "proof": "Mechanism: the loop test 'i < list.size()' is replaced by constant true so i++ continues forever and 'all.add(i)' grows the list without bound (heap exhaustion). Reached for any malformed non-empty obligation list; unmutated it adds list.size() entries."
+ },
+ {
+  "file": "ArgProvenance.java",
+  "method": "clip",
+  "mutant": "NakedReceiverMutator: replaced call to java/lang/String::substring with receiver",
+  "line": "s = s.substring(0, n);",
+  "proof": "Mechanism: clip shrinks an over-long label with 'while (IntentJs.u8len(s) > 256) { ...; s = s.substring(0, n); }'; the substring call is replaced by its receiver so s is never shortened and u8len(s) > 256 holds forever (a spin). Any label over 256 bytes (the clip tests) reaches it; unmutated the string halves each pass (a few passes)."
+ },
+ {
+  "file": "ArgProvenance.java",
+  "method": "decide",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = 0; !typed && i < ch.principalTexts.size(); i++) typed = occursAsToken(ch.principalTexts.get(i), leaf);",
+  "proof": "Mechanism: in decide the principal-text scan 'for (int i = 0; !typed && i < ch.principalTexts.size(); i++) typed = occursAsToken(...)' loses i++, so when the first principal text does not contain the leaf (typed stays false) i stays 0 and the loop spins forever. Any untyped leaf with a principal text reaches it; unmutated it scans size() (<= 2) texts."
+ },
+ {
+  "file": "ArgProvenance.java",
+  "method": "occursAsToken",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {",
+  "proof": "Mechanism: occursAsToken advances with 'i = text.indexOf(needle, i + 1)'; the constant 1 is replaced by 0, so indexOf(needle, i) returns the same occurrence again whenever it was rejected by the word-boundary tests, and the loop repeats forever (a spin). Any text where an occurrence fails the boundary test (e.g. 'abab' with needle 'b') reaches it; unmutated each pass moves past the previous occurrence."
+ },
+ {
+  "file": "ArgProvenance.java",
+  "method": "occursAsToken",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {",
+  "proof": "Mechanism: the step 'text.indexOf(needle, i + 1)' becomes 'i - 1': searching from i - 1 finds the same occurrence at i again whenever it was rejected by the boundary tests, so the loop repeats forever (a spin). Reached by any text with a rejected occurrence; unmutated each pass moves past the previous occurrence."
+ },
+ {
+  "file": "ArgProvenance.java",
+  "method": "occursAsToken",
+  "mutant": "NonVoidMethodCallMutator: removed call to java/lang/String::indexOf",
+  "line": "for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {",
+  "proof": "Mechanism: the dead variant removes the stepping call 'text.indexOf(needle, i + 1)' (the loop update), leaving i at the default 0 after each rejected occurrence; an occurrence rejected by the boundary tests then sends the loop back to index 0 and, whenever the check at 0 is rejected too, it repeats forever (a spin). Reached by any text with a rejected occurrence; unmutated each pass moves past the previous occurrence. (The variant removing the initial indexOf terminates with a different result and is caught by the occursAsToken tests.)"
+ },
+ {
+  "file": "Mesh.java",
+  "method": "consistency",
+  "mutant": "InlineConstantMutator: Substituted 1 with 2",
+  "line": "long fn = first - 1, sn = second - 1;",
+  "proof": "Mechanism: Mesh.consistency starts 'long fn = first - 1, sn = second - 1;' and then 'while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }'. The dead variant (first - 2) gives fn = -1 for first = 1 (every 1 -> N consistency proof in MeshK05KillTest.consistencyOverEverySizePair); -1 is odd and -1 >> 1 == -1 (arithmetic shift), so the loop never exits (a spin). Unmutated first = 1 gives fn = 0 and the loop is skipped. (The second - 2 variant terminates with a wrong sn and is caught by the same test.)"
+ },
+ {
+  "file": "Mesh.java",
+  "method": "consistency",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "Mechanism: line 330 is 'while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }'. The dead variants are the ones that stop the loop from shrinking fn or that run it for even fn: '== 1' -> '== 0' makes it loop while fn is even, and fn = 0 (first = 1, i.e. every 1 -> N proof in consistencyOverEverySizePair) satisfies it forever because 0 >> 1 == 0; 'fn >>= 1' -> 'fn >>= 0' never shifts an odd fn (first = 2k) so the test stays true forever. Both are spins. Unmutated: odd fn is shifted until even (<= 5 passes) and fn = 0 skips the loop."
+ },
+ {
+  "file": "Mesh.java",
+  "method": "consistency",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "while ((fn & 1) == 0 && fn != 0) { fn >>= 1; sn >>= 1; }",
+  "proof": "Mechanism: line 338 is 'while ((fn & 1) == 0 && fn != 0) { fn >>= 1; sn >>= 1; }' (entered when (fn & 1) == 1 || fn == sn). The dead variant 'fn >>= 0' never shifts, so for an even non-zero fn (the fn == sn case of a non-power-of-two old size, covered by consistencyOverEverySizePair) the test stays true forever (a spin). Unmutated each pass halves fn to its lowest set bit (<= 5 passes). (The '(fn & 0)' variant terminates with a wrong walk and is caught by the same test.)"
+ },
+ {
+  "file": "Mesh.java",
+  "method": "consistency",
+  "mutant": "MathMutator: Replaced bitwise AND with OR",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "Mechanism: 'while ((fn & 1) == 1)' becomes '(fn | 1) == 1', true exactly for fn in {0, 1}; fn = 0 (first = 1, every 1 -> N proof in consistencyOverEverySizePair) satisfies it and 'fn >>= 1' keeps it 0, so the loop never exits (a spin). Unmutated (0 & 1) == 1 is false and the loop is skipped."
+ },
+ {
+  "file": "Mesh.java",
+  "method": "consistency",
+  "mutant": "NegateConditionalsMutator: negated conditional",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "Mechanism: 'while ((fn & 1) == 1)' is negated to '(fn & 1) != 1', i.e. loop while fn is even; fn = 0 (first = 1, every 1 -> N proof in consistencyOverEverySizePair) is even and 0 >> 1 == 0, so the loop never exits (a spin). Unmutated the loop is skipped for fn = 0."
+ },
+ {
+  "file": "Mesh.java",
+  "method": "consistency",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "Mechanism: the equality test of 'while ((fn & 1) == 1)' is forced to pass (no exit jump), so the loop runs 'fn >>= 1; sn >>= 1' with no exit condition: fn reaches 0 (or -1) and stays there forever (a spin) for every proof reaching this line (all consistency proofs with first >= 1). Unmutated the loop exits at the first even fn."
+ },
+ {
+  "file": "ActionRegistry.java",
+  "method": "search",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int step = 0; step < MAX_EVOLUTION_STEPS; step++) {",
+  "proof": "Mechanism: ActionRegistry.search runs 'for (int step = 0; step < MAX_EVOLUTION_STEPS (32); step++)' with no early exit; the comparison is replaced by constant true, so the loop never ends (after the frontier empties each pass only allocates an empty list: a spin). Every decidePin / reapproval search reaches it; unmutated it runs exactly 32 passes."
+ },
+ {
+  "file": "ReadVault.java",
+  "method": "bernExpSmall",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (long k = 1; k <= MAX_STEPS; k++) if (!bern(d, num, Math.multiplyExact(den, k))) return k % 2 == 1;",
+  "proof": "Mechanism: bernExpSmall's 'for (long k = 1; k <= MAX_STEPS (100000); k++) if (!bern(d, num, den * k)) return ...; throw \"no termination\"' has the bound replaced by constant true. The scripted all-zero stream of K05ReadSideDiffTest (zero draws: uniform(den*k) < num always true) never produces the false that ends the loop, so the unmutated code throws 'bernoulli: no termination' after 100000 passes while the mutant spins until Math.multiplyExact(den, k) overflows (den = 1: ~2^63 passes, i.e. forever)."
+ },
+ {
+  "file": "ReadVault.java",
+  "method": "discreteLaplace",
+  "mutant": "RemoveConditionalMutator_ORDER_ELSE: removed conditional - replaced comparison check with false",
+  "line": "while (bernExpSmall(d, 1, 1)) if (++v > MAX_STEPS) throw new IllegalArgumentException(\"laplace: no termination\");",
+  "proof": "Mechanism: discreteLaplace's 'while (bernExpSmall(d, 1, 1)) if (++v > MAX_STEPS) throw \"no termination\"' has the comparison forced false, so the guard never throws. With the scripted stream of K05ReadSideDiffTest (high stream: bernExpSmall(1,1) always true) the unmutated code throws 'laplace: no termination' after 100001 passes; the mutant keeps incrementing v forever (a spin)."
+ },
+ {
+  "file": "ReadVault.java",
+  "method": "discreteLaplace",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int outer = 0; outer < MAX_STEPS; outer++) {",
+  "proof": "Mechanism: discreteLaplace's 'for (int outer = 0; outer < MAX_STEPS; outer++)' has the bound replaced by constant true. With the scripted stream of K05ReadSideDiffTest (negZero stream: every candidate hits 'negative && y == 0 -> continue') the unmutated code throws 'laplace: no sample' after 100000 passes while the mutant continues forever (a spin)."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runStateStoreConformance$4",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int c = 1; c <= o.rounds; c++) {",
+  "proof": "Mechanism: the claim-burst run loops 'for (int c = 1; c <= o.rounds; c++)', each pass racing o.threads claims of counter c; the comparison is replaced by constant true so it never ends (unbounded rounds with ever larger counters). Unmutated it runs o.rounds (1-5 in the tests) rounds."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runStateStoreConformance$6",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "for (int i = 0; i < o.handles; i++) hs.add(handle.get());",
+  "proof": "Mechanism: the claim-concurrent run opens handles with 'for (int i = 0; i < o.handles; i++) hs.add(handle.get())'; i++ changed to i-- gives 0, -1, ... all < o.handles, so it never ends and keeps opening handles and growing the list (resource/heap exhaustion). Unmutated it opens o.handles (2-4) handles."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runStateStoreConformance$6",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 0; i < o.handles; i++) hs.add(handle.get());",
+  "proof": "Mechanism: the same handle-opening loop has its comparison replaced by constant true, so i++ continues forever, opening a new handle per pass until the store/driver runs out of connections or heap (run error). Unmutated it opens o.handles (2-4) handles."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runStateStoreConformance$6",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int c = 1; c <= o.rounds; c++) {",
+  "proof": "Mechanism: the claim-concurrent run loops 'for (int c = 1; c <= o.rounds; c++)' racing o.threads claims per round; the comparison is replaced by constant true so it never ends (unbounded rounds). Unmutated it runs o.rounds (1-5 in the tests) rounds."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "race",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 0; i < n; i++) {",
+  "proof": "Mechanism: race() starts its threads with 'for (int i = 0; i < n; i++) { ...; t.start(); }'; the comparison is replaced by constant true, so the loop never ends and starts a new thread (each parked at the barrier, then growing 'ts') on every pass until the process cannot create more native threads (resource exhaustion). Unmutated it starts exactly n (2-16) threads."
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "ConditionalsBoundaryMutator: changed conditional boundary",
+  "line": "while (n > 1) {",
+  "proof": "Mechanism: pathShape's 'while (n > 1)' becomes 'n >= 1'; for n = 1 (the size reached after every halving, and size-1 trees) k = 1, idx < k holds (idx is 0 by then) so 'out.add(\"R\"); n = k' sets n = 1 again: the loop never ends and out grows without bound (heap exhaustion). Reached by every inclusion path computation; unmutated the loop ends when n reaches 1."
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "ConditionalsBoundaryMutator: changed conditional boundary",
+  "line": "while (k * 2 < n) k *= 2;",
+  "proof": "Mechanism: the inner loop 'while (k * 2 < n) k *= 2' becomes 'k * 2 <= n', so k can reach n itself for n a power of two (e.g. n = 2: k = 1, 2 <= 2 -> k = 2); then idx < k holds, 'out.add(\"R\"); n = k' leaves n = 2, and the outer loop repeats the same state forever, growing out (heap exhaustion). Reached by any tree with a power-of-two segment size (size 2, 4, 8 ... in the inclusion and consistency tests); unmutated k < n always."
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "InlineConstantMutator: Substituted 1 with 2",
+  "line": "long k = 1;",
+  "proof": "Mechanism: 'long k = 1' becomes 'k = 2'; for n = 2 the inner loop leaves k = 2, idx < k holds and 'n = k' keeps n = 2, so the outer loop never ends and out grows without bound (heap exhaustion). n = 2 is reached for every tree of size 2, 3 ... (path halving ends at 2); unmutated k = 1 for n = 2."
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "InlineConstantMutator: Substituted 2 with 3",
+  "line": "while (k * 2 < n) k *= 2;",
+  "proof": "Mechanism: the dead variant turns the doubling 'k *= 2' into 'k *= 3': for n = 4 the inner loop yields k = 3 (3 * 2 = 6 !< 4), then idx < 3 gives n = k = 3, and for n = 3 it gives k = 3 again (3 * 2 !< 3 after k = 1 -> 3), so n = 3 repeats forever and out grows without bound (heap exhaustion). Reached by any tree of size 3-4; unmutated k = 2 and n shrinks. (The variant changing the condition's 2 terminates with a wrong shape and is caught by the path-shape assertions.)"
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "MathMutator: Replaced long multiplication with division",
+  "line": "while (k * 2 < n) k *= 2;",
+  "proof": "Mechanism: line 434 is 'while (k * 2 < n) k *= 2'. Two dead variants replace a multiplication by a division. (a) the condition 'k / 2 < n': k doubles until k / 2 >= n, so k ends at 2n..4n > n; then 'idx < k' gives n = k > old n, so n grows each pass of 'while (n > 1)' and out grows without bound (heap exhaustion). (b) the body 'k /= 2': from k = 1 it becomes 0 and 0 * 2 < n holds for every n >= 1, a spin. Reached by every pathShape call with size > 2; unmutated the loop runs <= log2(n) passes."
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "NegateConditionalsMutator: negated conditional",
+  "line": "while (n > 1) {",
+  "proof": "Mechanism: 'while (n > 1)' is negated to 'n <= 1'; for n = 1 (single-leaf trees, which the inclusion and Merkle tests use) k = 1, idx = 0 < k, so 'out.add(\"R\"); n = k' keeps n = 1 and the loop never ends, growing out without bound (heap exhaustion). (For n > 1 the mutant returns an empty path, which the shape assertions catch.) Unmutated, n = 1 skips the loop."
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "while (n > 1) {",
+  "proof": "Mechanism: the test 'n > 1' of the outer loop is forced true, so once n reaches 1 the pass k = 1, idx = 0 < k, 'out.add(\"R\"); n = k' repeats with n = 1 forever, growing out without bound (heap exhaustion). Every pathShape call reaches n = 1; unmutated the loop exits there."
+ },
+ {
+  "file": "Pca.java",
+  "method": "pathShape",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "while (k * 2 < n) k *= 2;",
+  "proof": "Mechanism: the inner loop test 'k * 2 < n' is forced true so 'k *= 2' never stops: k doubles to 2^62, wraps to Long.MIN_VALUE, then 0, and stays 0 (a spin, no allocation). Every pathShape call with n > 1 reaches it; unmutated the loop runs <= log2(n) times."
+ },
+ {
+  "file": "Pca.java",
+  "method": "split",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "static int split(int n) { int k = 1; while (k * 2 < n) k *= 2; return k; }",
+  "proof": "Mechanism: split's 'int k = 1' becomes 'k = 0'; then 'while (k * 2 < n) k *= 2' has 0 < n true and k *= 2 keeps k = 0, so it never exits (a spin) for every n >= 1. Every Merkle build/proof reaches it (hashes of 2+ leaves); unmutated k = 1 doubles to the largest power of two below n."
+ },
+ {
+  "file": "Pca.java",
+  "method": "split",
+  "mutant": "MathMutator: Replaced integer multiplication with division",
+  "line": "static int split(int n) { int k = 1; while (k * 2 < n) k *= 2; return k; }",
+  "proof": "Mechanism: split's 'k *= 2' (or the condition's k * 2) becomes a division: the body 'k /= 2' takes k = 1 to 0 and 0 * 2 < n holds for every n >= 1, so it never exits (a spin). Every Merkle build with 3+ leaves reaches it; unmutated k doubles to the largest power of two below n (<= 4 passes in the tests)."
+ },
+ {
+  "file": "Pca.java",
+  "method": "split",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "static int split(int n) { int k = 1; while (k * 2 < n) k *= 2; return k; }",
+  "proof": "Mechanism: split's loop test 'k * 2 < n' is forced true, so 'k *= 2' continues until int overflow: k reaches 2^30, wraps to Integer.MIN_VALUE, then 0, and stays 0 (a spin). Every Merkle build with 2+ leaves reaches it; unmutated the loop stops when k * 2 >= n."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "isSafeSource",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "i++;",
+  "proof": "the plain-character `i++` becomes `i--`: for a pattern whose plain character follows a group opener or class (e.g. \"(a)\\\\1\" in K042SafeRegexGuardTest, \"(?:[a]|b)+\" in K042SafeRegexGapTest) the cursor steps back onto the opener, which pushes another Frame and reads the plain character again: an endless cycle that grows `stack` without bound (MEMORY_ERROR). Unmutated i advances. (A pattern whose first token is a plain character just throws StringIndexOutOfBoundsException at charAt(-1); K05R6DAParseTest.plainCharactersAndClassesPassTheGuard fails on that, but the group patterns hang first.)"
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseXml",
+  "mutant": "NegateConditionalsMutator: negated conditional",
+  "line": "if (s.charAt(i) != '<') {",
+  "proof": "`if (s.charAt(i) != '<')` becomes `==`: '<' is taken as text. For every document the suite parses (AttestXmlKillTest.ROWS, AttestFoundationTest, AttestNvidiaRimKillTest, K05R5D1DeadTest) the first character is '<': end = s.indexOf('<', i) = i, i = end does not advance, cur == null so the empty text passes the whitespace check and `continue`s: an endless loop, no allocation. Unmutated '<' reaches the markup branches. (It terminates only for text-only input such as \"x\", which K05R6DAParseTest.textOutsideTheDocumentElementIsRefusedAsText fails on, but every test that parses a document hangs it first.)"
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseXml",
+  "mutant": "ArgumentPropagationMutator: replaced call to java/lang/String::indexOf with argument",
+  "line": "int end = s.indexOf('<', i);",
+  "proof": "`int end = s.indexOf('<', i);` becomes end = '<' = 60: every text run that starts before index 60 in a longer document is read up to index 60 and i jumps to 60; when s.charAt(60) is not '<' the next pass takes the text branch at i = 60 with end = 60 = i, so i never advances and the loop never ends (empty appendText or an empty whitespace check, no allocation). About 280 of the 522 AttestXmlKillTest.ROWS documents have this shape (e.g. \"<a>&#x2f;&#x2F;&#x2a;...\" with text at index 3 and length > 60), and AttestFoundationTest/K05R5D1DeadTest.XML do too. Unmutated end is the next '<' and i advances."
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "InlineConstantMutator: Substituted 0 with 1",
+  "line": "if (first == 0) {",
+  "proof": "`if (first == 0)` becomes `if (first == 1)`: for the vector rows with oldSize 0 and newSize >= 1 (e.g. (0,1,[]) with old_root = the empty-tree root, expected true) the empty-tree block is skipped. first != second, first & (first-1) == 0 so the old root is decoded and path = [old], fn = first - 1 = -1 and sn = second - 1; `while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }` then runs on -1 for ever (-1 >> 1 == -1, no allocation). Unmutated the block returns at once. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "InlineConstantMutator: Substituted 1 with 2",
+  "line": "long fn = first - 1, sn = second - 1;",
+  "proof": "of the two constants 1 in `long fn = first - 1, sn = second - 1;` the dead record is `first - 2` (the `second - 2` variant never hangs: the vector rows fail it by assertion and PIT records KILLED): for the rows with oldSize 1 (e.g. (1,2,[x]) expected true) fn = -1, so `while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }` never ends (-1 >> 1 == -1, no allocation). Unmutated fn = 0 and the loop is skipped. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "MathMutator: Replaced bitwise AND with OR",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "`(fn & 1) == 1` becomes `(fn | 1) == 1`, true for fn 0 and 1: for the rows with oldSize 1 (fn = 0, e.g. (1,2,[x])) the loop `{ fn >>= 1; sn >>= 1; }` runs for ever on fn = 0 (0 >> 1 == 0, no allocation). Unmutated (0 & 1) == 1 is false and the loop is skipped. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "MathMutator: Replaced bitwise AND with OR",
+  "line": "if ((fn & 1) == 1 || fn == sn) {",
+  "proof": "in `if ((fn & 1) == 1 || fn == sn)` the `&` becomes `|`: (fn | 1) == 1 is true for fn = 0, so the rows with oldSize 1 (fn = 0, sn = second - 1, path of two or more nodes, e.g. (1,2,[x])) enter the branch whose `while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }` never ends (0 >> 1 == 0, no allocation). Unmutated fn = 0 takes the else branch. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "NegateConditionalsMutator: negated conditional",
+  "line": "if (first == 0) {",
+  "proof": "`if (first == 0)` becomes `if (first != 0)`: rows with oldSize 0 and newSize >= 1 skip the empty-tree block; with path = [old] the walk starts at fn = -1 and `while ((fn & 1) == 1) { fn >>= 1; ... }` never ends (-1 >> 1 == -1, no allocation). Unmutated those rows return in the block. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "NegateConditionalsMutator: negated conditional",
+  "line": "while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }",
+  "proof": "`(fn & 1) == 1` becomes `!= 1`: for the rows with oldSize 1 (fn = 0, e.g. (1,2,[x])) (0 & 1) != 1 holds and `fn >>= 1` keeps fn at 0 for ever (no allocation). Unmutated the loop is skipped. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "NegateConditionalsMutator: negated conditional",
+  "line": "if ((fn & 1) == 1 || fn == sn) {",
+  "proof": "one of the two comparisons of `(fn & 1) == 1 || fn == sn` is negated (the two records have the same text): on the rows with oldSize 1 (fn = 0, sn >= 1, e.g. (1,2,[x])) `(fn & 1) != 1` or `fn != sn` is true, so the branch with `while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }` is taken with fn = 0 and never ends (0 >> 1 == 0, no allocation). Unmutated the else branch runs. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "RemoveConditionalMutator_EQUAL_ELSE: removed conditional - replaced equality check with false",
+  "line": "if (first == 0) {",
+  "proof": "the test of `if (first == 0)` is forced to skip the block: rows with oldSize 0 and newSize >= 1 fall through, fn = first - 1 = -1 and `while ((fn & 1) == 1) { fn >>= 1; sn >>= 1; }` never ends (-1 >> 1 == -1, no allocation). Unmutated the block returns at once. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "RemoveConditionalMutator_EQUAL_ELSE: removed conditional - replaced equality check with false",
+  "line": "if ((fn & 1) == 1 || fn == sn) {",
+  "proof": "the dead record is the variant that forces `(fn & 1) == 1 || fn == sn` to take the branch (the variants that force the else branch fail the vector rows by assertion and are recorded KILLED): on the rows with oldSize 1 (fn = 0, e.g. (1,2,[x])) the branch's `while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }` runs for ever on fn = 0 (0 >> 1 == 0, no allocation). Unmutated fn = 0 takes the else branch. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "Ledger.java",
+  "method": "consistency",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "if ((fn & 1) == 1 || fn == sn) {",
+  "proof": "the dead record is the variant that forces `(fn & 1) == 1 || fn == sn` to take the branch (the variants that force the else branch fail the vector rows by assertion and are recorded KILLED): on the rows with oldSize 1 (fn = 0, e.g. (1,2,[x])) the branch's `while ((fn & 1) == 0) { fn >>= 1; sn >>= 1; }` runs for ever on fn = 0 (0 >> 1 == 0, no allocation). Unmutated fn = 0 takes the else branch. LedgerVectors (LedgerVectorsTest.consistency and K05LedgerDiffTest.consistency replay ledger-vectors.json: every (oldSize, newSize) pair up to 13/16/17/64/70 with real proofs)"
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "race",
+  "mutant": "ConditionalsBoundaryMutator: changed conditional boundary",
+  "line": "for (int i = 0; i < n; i++) {",
+  "proof": "`for (int i = 0; i < n; i++)` of race(CyclicBarrier gate, int n, fn) becomes `i <= n`: n + 1 threads are started on a barrier of n parties. The first n trip it; the last parks alone on the next generation until gate.await(60, SECONDS) times out, and race() joins every thread, so each call blocks 60 s, longer than PIT's limit. Every n >= 2 call hangs (K05StoreConformanceKillTest runs the profiles with threads 2 and 3, claim-burst / create-race / transition-race with n threads; n = 1 does not hang). Unmutated n threads trip the barrier at once."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "race",
+  "mutant": "InlineConstantMutator: Substituted 0 with 1",
+  "line": "for (int i = 0; i < n; i++) {",
+  "proof": "`for (int i = 0; ...)` starts at 1: only n - 1 threads reach a barrier of n parties, which never trips; each parked thread waits gate.await(60, SECONDS) and race() joins them, so each call blocks 60 s, longer than PIT's limit. Every n >= 2 call hangs (K05StoreConformanceKillTest runs the profiles with threads 2 and 3). Unmutated n threads trip the barrier at once."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "case '$': i++; return new Node('$');",
+  "proof": "Mechanism: in atom() the '$' case 'case '$': i++; return new Node('$');' has its increment constant replaced (i += 0): the cursor does not advance past the '$', atom() returns a Node but the calling sequence loop sees the same '$' again and appends another Node forever (unbounded growth of the node list, heap exhaustion) for every pattern containing '$'. Unmutated i moves one character on each call."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseStartTag",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "while (i < rest.length() && isXmlSpace(rest.charAt(i))) i++;",
+  "proof": "the whitespace skip inside a start tag no longer advances: i stays on the first space (e.g. `<a b=\"1\">`) forever (no allocation). Unmutated i passes the whitespace."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseStartTag",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "while (k < rest.length() && !isXmlSpace(rest.charAt(k)) && rest.charAt(k) != '=' && rest.charAt(k) != '>' && rest.charAt(k) != '/') k++;",
+  "proof": "the attribute-name scan `while (k < ...) k++;` no longer advances: k stays on the first name character forever (no allocation), for every attribute. Unmutated k reaches the end of the attribute name."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseXml",
+  "mutant": "NonVoidMethodCallMutator: removed call to java/lang/String::indexOf",
+  "line": "int end = s.indexOf('<', i);",
+  "proof": "Mechanism: 'int end = s.indexOf('<', i);' loses the indexOf call, so end is 0. In this text branch, a document whose text node begins at index 0 (for example the one-character document \"x\" in AttestXmlKillTest.ROWS and K05R6DAParseTest) then runs 'i = end', i stays 0 and the outer 'while (i < s.length())' re-enters the same text branch forever (a spin); for a text node after index 0 substring(i, 0) throws instead. Unmutated end is the index of the next '<' (or the end), so i always advances."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "parseXml",
+  "mutant": "NonVoidMethodCallMutator: removed call to java/lang/String::length",
+  "line": "if (end < 0) end = s.length();",
+  "proof": "Mechanism: 'if (end < 0) end = s.length();' loses the length call, so for trailing text with no further '<' end becomes 0 and 'i = end' sends the cursor back to the start of the document: the outer 'while (i < s.length())' re-parses the document from index 0 again and again (the element stack keeps growing while it does) and never terminates, for any document that ends in text (such as the \"x\" row). Unmutated end is s.length() and the loop ends."
+ },
+ {
+  "file": "AttestV8Json.java",
+  "method": "ws",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "if (c == ' ' || c == '\\t' || c == '\\n' || c == '\\r') pos++;",
+  "proof": "Mechanism: in ws() 'if (c == ' ' || ...) pos++;' becomes pos += 0, so a whitespace character under the cursor is never consumed and 'while (pos < src.length())' reads the same character forever (a spin, no allocation) for any JSON text containing whitespace between tokens. Unmutated pos moves past every whitespace character."
+ },
+ {
+  "file": "AttestV8Json.java",
+  "method": "ws",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable pos",
+  "line": "if (c == ' ' || c == '\\t' || c == '\\n' || c == '\\r') pos++;",
+  "proof": "Mechanism: in ws() the increment 'pos++' on a whitespace character is removed, so the cursor stays on that character and 'while (pos < src.length())' reads it forever (a spin, no allocation) for any JSON text containing whitespace between tokens. Unmutated pos moves past every whitespace character."
+ },
+ {
+  "file": "AttestXml.java",
+  "method": "scope",
+  "mutant": "RemoveIncrementsMutator: Removed increment -1",
+  "line": "for (int i = chain.size() - 1; i >= 0; i--) for (Decl d : chain.get(i).decls) out.put(d.prefix, d.uri);",
+  "proof": "`for (int i = chain.size() - 1; i >= 0; i--)` without its `i--`: chain always holds the element itself (size >= 1), so i stays at size - 1 >= 0 and the loop condition holds for ever; the body only re-puts the same prefix -> uri pairs into a HashMap (no growth), so the call spins without allocating and never returns. Unmutated, i decreases to -1 after chain.size() passes."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "has",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "while (lo <= hi) {",
+  "proof": "Exact repeating state (lo, hi at the loop test; mid = (lo + hi) >> 1; DIGIT = [[48,57]] is one range, WORD = [[48,57],[65,90],[95,95],[97,122]] has four): c = 97 against DIGIT: entry (lo=0, hi=0): mid = 0, c > 57 so lo = mid + 1 = 1 and the unmutated loop test `1 <= 0` ends the loop (not found). With the test forced true the loop goes on in state (lo=1, hi=0): mid = (1 + 0) >> 1 = 0, ranges[0] = [48,57], c > 57, lo = mid + 1 = 1: state (1, 0) again, no variable changed after one iteration, so it repeats for ever; nothing is allocated. (A character below the first range ends in an ArrayIndexOutOfBoundsException at mid = -1 instead, a test failure, which is why only the above-range case times out.) The mutant is covered (PIT ran it against the covering tests) and ended TIMED_OUT in two full runs, so a covering test supplies an input of this shape; the witness below is the smallest one."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "has",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "if (c < r[0]) hi = mid - 1;",
+  "proof": "Exact repeating state (lo, hi at the loop test; mid = (lo + hi) >> 1; DIGIT = [[48,57]] is one range, WORD = [[48,57],[65,90],[95,95],[97,122]] has four): c = 47 against DIGIT: entry (lo=0, hi=0): mid = 0, c < 48 so the mutant sets hi = mid - 0 = 0: state (0, 0) again, unchanged after one iteration, for ever. (Unmutated: hi = -1, `0 <= -1` ends the loop.) The mutant is covered (PIT ran it against the covering tests) and ended TIMED_OUT in two full runs, so a covering test supplies an input of this shape; the witness below is the smallest one."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "has",
+  "mutant": "MathMutator: Replaced integer subtraction with addition",
+  "line": "if (c < r[0]) hi = mid - 1;",
+  "proof": "Exact repeating state (lo, hi at the loop test; mid = (lo + hi) >> 1; DIGIT = [[48,57]] is one range, WORD = [[48,57],[65,90],[95,95],[97,122]] has four): c = 47 against DIGIT: entry (lo=0, hi=0): mid = 0, c < 48 so the mutant sets hi = mid + 1 = 1: state (0, 1): mid = (0 + 1) >> 1 = 0, c < 48, hi = 0 + 1 = 1: state (0, 1) again, unchanged after one iteration, for ever. (Unmutated: hi = -1 ends the loop.) The mutant is covered (PIT ran it against the covering tests) and ended TIMED_OUT in two full runs, so a covering test supplies an input of this shape; the witness below is the smallest one."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "has",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "else if (c > r[1]) lo = mid + 1;",
+  "proof": "Exact repeating state (lo, hi at the loop test; mid = (lo + hi) >> 1; DIGIT = [[48,57]] is one range, WORD = [[48,57],[65,90],[95,95],[97,122]] has four): c = 97 against DIGIT: entry (lo=0, hi=0): mid = 0, c > 57 so the mutant sets lo = mid + 0 = 0: state (0, 0) again, unchanged after one iteration, for ever. (Unmutated: lo = 1, `1 <= 0` ends the loop.) The mutant is covered (PIT ran it against the covering tests) and ended TIMED_OUT in two full runs, so a covering test supplies an input of this shape; the witness below is the smallest one."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "has",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "else if (c > r[1]) lo = mid + 1;",
+  "proof": "Exact repeating state (lo, hi at the loop test; mid = (lo + hi) >> 1; DIGIT = [[48,57]] is one range, WORD = [[48,57],[65,90],[95,95],[97,122]] has four): c = 126 against WORD (four ranges): entry (lo=0, hi=3): mid = 1, ranges[1] = [65,90], c > 90 so the mutant sets lo = mid - 1 = 0: state (0, 3) again, unchanged after one iteration, for ever. (Unmutated: lo = 2, the interval shrinks to (3, 3) then (4, 3) and ends.) With a one-range class the same step gives lo = -1 and an ArrayIndexOutOfBoundsException instead, a test failure. The mutant is covered (PIT ran it against the covering tests) and ended TIMED_OUT in two full runs, so a covering test supplies an input of this shape; the witness below is the smallest one."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "quantified",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "else if (c == '+') { min = 1; max = Double.POSITIVE_INFINITY; i++; }",
+  "proof": "`i++` of the `+` quantifier compiles to `i = i + 1`; the mutant makes it `i = i - 1`, so the cursor goes back onto the atom before the `+`: the enclosing cat loop calls quantified() at that atom again, reads the same `+` and steps back again, adding one more Node to the items list every pass. The parse never ends and the heap grows until the minion is out of memory (any pattern with a `+` quantifier). Unmutated, i advances past the quantifier."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "InlineConstantMutator: Substituted 1 with 0",
+  "line": "case '^': i++; return new Node('^');",
+  "proof": "`i++` after `^` becomes `i += 0`: atom() returns without consuming the `^`, the enclosing cat loop calls quantified() -> atom() at the same index for ever and adds one Node per pass to its items list: the parse never ends and the heap grows until the minion is out of memory (any pattern with `^`). Unmutated, i advances past it."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "case '^': i++; return new Node('^');",
+  "proof": "The assignment `i = i + 1` after `^` is removed: the cursor never passes the `^`, so the enclosing cat loop re-parses it for ever, adding one Node per pass: the heap grows until the minion is out of memory (any pattern with `^`). Unmutated, i advances."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "case '$': i++; return new Node('$');",
+  "proof": "`i++` after `$` compiles to `i = i + 1`; the mutant makes it `i = i - 1`: the cursor goes back onto the character before the `$`, which is parsed again and then reaches the `$` again, adding Nodes every cycle: the parse never ends and the heap grows until the minion is out of memory (any pattern with `$` after another atom). Unmutated, i advances past the `$`."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "atom",
+  "mutant": "MemberVariableMutator: Removed assignment to member variable i",
+  "line": "case '$': i++; return new Node('$');",
+  "proof": "The assignment `i = i + 1` after `$` is removed: the cursor never passes the `$`, so the enclosing cat loop re-parses it for ever, adding one Node per pass: the heap grows until the minion is out of memory (any pattern with `$`). Unmutated, i advances."
+ },
+ {
+  "file": "SafeRegex.java",
+  "method": "escapeInner",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "i++;",
+  "proof": "The `i++` that consumes the escaped character compiles to `i = i + 1`; the mutant makes it `i = i - 1`: after `\\d` the cursor is back on the backslash, so the enclosing cat loop parses the same escape again for ever, adding one Node per pass: the heap grows until the minion is out of memory (any pattern with an escape). Unmutated, i advances past the escape."
+ },
+ {
+  "file": "LessNative.java",
+  "method": "candidates",
+  "mutant": "NakedReceiverMutator: replaced call to java/nio/file/Path::getParent with receiver",
+  "line": "for (Path d = Paths.get(System.getProperty(\"user.dir\", \".\")).toAbsolutePath(); d != null; d = d.getParent()) {",
+  "proof": "`d = d.getParent()` becomes `d = d`: the walk up from user.dir never moves, `d != null` holds for ever, and the body only `continue`s when `d/sdks/pca-less-c/build` is not a directory (the case for the module directory the tests run in) or `break`s when it is: the loop never ends and allocates nothing. Unmutated, the walk reaches the file-system root where getParent() is null."
+ },
+ {
+  "file": "AttestV8Json.java",
+  "method": "str",
+  "mutant": "MathMutator: Replaced integer addition with subtraction",
+  "line": "pos++;",
+  "proof": "The `pos++` that consumes the escape character after a backslash compiles to `pos = pos + 1`; the mutant makes it `pos = pos - 1`: for a valid escape (`\\n`, `\\\"` ...) pos returns to the backslash, the string loop reads the same backslash again and the state repeats for ever, so the closing quote is never reached. (Unmutated, pos advances past the escape character.)"
+ },
+ {
+  "file": "AttestCommon.java",
+  "method": "jsTrim",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "while (a < b && isJsSpace(s.charAt(a))) a++;",
+  "proof": "`while (a < b && isJsSpace(s.charAt(a))) a++;` loses its `a++`: for a string that starts with a space character a stays 0, the condition holds for ever and the call spins without allocating. Unmutated, a skips the leading space characters (jsTrim of ' 535.86 ' is exercised by the tests)."
+ },
+ {
+  "file": "AttestCommon.java",
+  "method": "jsTrim",
+  "mutant": "RemoveIncrementsMutator: Removed increment -1",
+  "line": "while (b > a && isJsSpace(s.charAt(b - 1))) b--;",
+  "proof": "`while (b > a && isJsSpace(s.charAt(b - 1))) b--;` loses its `b--`: for a string that ends with a space character b stays at the length, the condition holds for ever and the call spins without allocating. Unmutated, b skips the trailing space characters."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runBudgetStoreConformance$16",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int c = 2; c < 2 + o.rounds; c++) {",
+  "proof": "the loop test `c < 2 + o.rounds` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when c reaches 2 + o.rounds."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runKvRegistryConformance$24",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "for (int i = 0; i < o.handles; i++) regs.add(new BreakGlass.Registry(auth, revs, handle.get()));",
+  "proof": "`i++` becomes `i--`: i starts at 0 and moves away from its bound o.handles, so `i < o.handles` holds on every pass and the loop never ends; each pass adds a new BreakGlass.Registry to `regs`, so the heap fills and the minion dies of OutOfMemory. Unmutated, i reaches o.handles and the loop ends."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runKvRegistryConformance$24",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 0; i < o.handles; i++) regs.add(new BreakGlass.Registry(auth, revs, handle.get()));",
+  "proof": "the loop test `i < o.handles` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when i reaches o.handles. Each pass also adds a Registry to `regs`, so the heap fills."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runOperationStoreConformance$29",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int r = 0; r < o.rounds; r++) {",
+  "proof": "the loop test `r < o.rounds` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when r reaches o.rounds. Each pass runs a new race on a fresh operation id."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runOperationStoreConformance$31",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int r = 0; r < o.rounds; r++) {",
+  "proof": "the loop test `r < o.rounds` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when r reaches o.rounds. Each pass creates a new operation record and races on it."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runOperationStoreConformance$34",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "for (int n = 0; n < o.handles; n++) hs.add(handle.get());",
+  "proof": "`n++` becomes `n--`: n starts at 0 and moves away from its bound o.handles, so `n < o.handles` holds on every pass and the loop never ends; each pass adds a handle to `hs`, so the heap fills and the minion dies of OutOfMemory. Unmutated, n reaches o.handles and the loop ends."
+ },
+ {
+  "file": "StoreConformance.java",
+  "method": "lambda$runOperationStoreConformance$34",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int n = 0; n < o.handles; n++) hs.add(handle.get());",
+  "proof": "the loop test `n < o.handles` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when n reaches o.handles. Each pass adds a handle to `hs`, so the heap fills."
+ },
+ {
+  "file": "Lease.java",
+  "method": "revoke",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "else for (int i = 0; i < shards; i++) targets.add(i);",
+  "proof": "`i++` becomes `i--`: i starts at 0 and moves away from its bound shards, so `i < shards` holds on every pass and the loop never ends; each pass adds to `targets`, so the heap fills and the minion dies of OutOfMemory. Unmutated, i reaches shards and the loop ends."
+ },
+ {
+  "file": "Lease.java",
+  "method": "revoke",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "else for (int i = 0; i < shards; i++) targets.add(i);",
+  "proof": "the loop test `i < shards` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when i reaches shards. Each pass adds to `targets`, so the heap fills."
+ },
+ {
+  "file": "AttestNvidiaRim.java",
+  "method": "checkChainRevocation",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "for (int i = 0; i < last; i++) required.add(i);",
+  "proof": "`i++` becomes `i--`: i starts at 0 and moves away from its bound last, so `i < last` holds on every pass and the loop never ends; each pass adds to `required`, so the heap fills and the minion dies of OutOfMemory. Unmutated, i reaches last and the loop ends."
+ },
+ {
+  "file": "AttestNvidiaRim.java",
+  "method": "checkChainRevocation",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 0; i < last; i++) required.add(i);",
+  "proof": "the loop test `i < last` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when i reaches last. Each pass adds to `required`, so the heap fills."
+ },
+ {
+  "file": "Taint.java",
+  "method": "gate",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int r = 0; r <= MAX_RANK; r++) if (r / 4.0 <= maxTaint) allowed = r;",
+  "proof": "the loop test `r <= MAX_RANK` is replaced by true, so `for (int r = 0; ...; r++)` has no exit (r wraps after 2^31 passes and the test is still true) and `gate` never returns; the minion hits its time limit. Unmutated, r stops after MAX_RANK."
+ },
+ {
+  "file": "Risk.java",
+  "method": "planGeodesic",
+  "mutant": "IncrementsMutator: Changed increment from 1 to -1",
+  "line": "for (int i = 0; i < n; i++) adj.add(new HashSet<>());",
+  "proof": "`i++` becomes `i--`: i starts at 0 and moves away from its bound n, so `i < n` holds on every pass and the loop never ends; each pass adds a new HashSet to `adj`, so the heap fills and the minion dies of OutOfMemory. Unmutated, i reaches n and the loop ends."
+ },
+ {
+  "file": "Risk.java",
+  "method": "planGeodesic",
+  "mutant": "RemoveConditionalMutator_ORDER_IF: removed conditional - replaced comparison check with true",
+  "line": "for (int i = 0; i < n; i++) adj.add(new HashSet<>());",
+  "proof": "the loop test `i < n` is replaced by true, so the loop has no exit: the counter keeps climbing (an int wrap after 2^31 passes still satisfies true) and the pass repeats until the minion's time limit or heap ends it. Unmutated, the loop stops when i reaches n. Each pass adds a HashSet to `adj`, so the heap fills."
+ },
+ {
+  "file": "Risk.java",
+  "method": "planGeodesic",
+  "mutant": "RemoveConditionalMutator_EQUAL_IF: removed conditional - replaced equality check with true",
+  "line": "if (dist[v] == -1) {",
+  "proof": "`if (dist[v] == -1)` is replaced by true, so every neighbour v is re-assigned a distance and re-queued each time it is seen, including nodes already visited: in any graph with an edge the BFS queue refills forever (u -> v -> u ...) so `for (int h = 0; h < q.size(); h++)` never reaches the end of a queue that keeps growing; the heap fills or the minion hits its time limit. Unmutated, only unvisited nodes are queued, at most n pushes."
+ },
+ {
+  "file": "Prohibitions.java",
+  "method": "verifySignedSafetyEvidence",
+  "mutant": "RemoveIncrementsMutator: Removed increment 1",
+  "line": "for (int i = 0; covered && i < rows.size(); i++) {",
+  "proof": "Without i++ the coverage loop in verifySignedSafetyEvidence never advances: i stays 0, so the body re-checks rows[0] against ids[0] for ever. The loop is entered only after `covered = rows.size() == ids.size()` is true with rows non-empty; if rows[0].id equals ids[0], covered stays true and `0 < rows.size()` stays true, so the loop never exits (the minion hits its time limit). If rows[0] is null or its id differs, the mutant exits on the first pass exactly like the original. Every input that distinguishes the mutant (a matching first row) therefore hangs, so no test can kill it by failing; the timeout is the mutant being caught."
+ }
+]

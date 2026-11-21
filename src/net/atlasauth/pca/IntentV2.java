@@ -24,6 +24,9 @@ import java.util.Set;
 public final class IntentV2 {
     private IntentV2() {}
 
+    /** The V5 ceiling layers, in evaluation order. */
+    private static final List<String> LAYER_KEYS = NullSafe.list(List.of("org", "site", "std"));
+
     /**
      * The verifier state the v2 checks read (verifier-held, never the agent's): {@code {policy?, params?, schema?: {docs,
      * keys}, session?: {root?, grants?, revocation?}, layers?, wb?: {artifacts?, policy?}, acc?: {state?, monitors?,
@@ -78,6 +81,12 @@ public final class IntentV2 {
     public static final class Decision {
         public final List<Check> checks = new ArrayList<>();
         public final Map<String, Object> env = new LinkedHashMap<>();
+        /** Worlds decided by a single oracle (their {@code env.world.<name>} is model-derived, rule 21); empty when none. */
+        List<String> singleSource = NullSafe.list(List.of());
+        /** Rule 21 compatibility mode in effect: a grant reads model-derived paths and was accepted as legacy (report it degraded). */
+        public boolean legacyModelPolarity;
+        /** The schema the {@code schema} check accepted (null when it did not run or failed). */
+        Object schemaDoc;
     }
 
     /** True iff any v2 check would be reported (a malformed present context fails closed, so it counts). */
@@ -105,7 +114,9 @@ public final class IntentV2 {
         if (!optMap(c, "policy")) return "policy must be an object";
         if (c.containsKey("policy")) {
             Map<String, Object> pr = IntentJs.obj(c.get("policy"));
-            for (String k : pr.keySet()) if (!k.equals("session") && !k.equals("schema") && !k.equals("acc") && !k.equals("map")) return "policy: unknown member '" + k + "'";
+            for (String k : pr.keySet()) if (!k.equals("session") && !k.equals("schema") && !k.equals("acc") && !k.equals("map") && !k.equals("model_polarity")) return "policy: unknown member '" + k + "'";
+            if (pr.containsKey("model_polarity") && !"strict".equals(pr.get("model_polarity")) && !"legacy".equals(pr.get("model_polarity")))
+                return "policy.model_polarity must be 'strict' or 'legacy'";
             if (!optMap(pr, "session")) return "policy.session must be an object";
             if (pr.containsKey("session")) {
                 Map<String, Object> o = IntentJs.obj(pr.get("session"));
@@ -134,14 +145,23 @@ public final class IntentV2 {
                 if (o.containsKey("max_residual_risk_ppm") && !IntentJs.isNonNeg(o.get("max_residual_risk_ppm"))) return "policy.map.max_residual_risk_ppm must be a non-negative safe integer";
             }
         }
+        if (!optMap(c, "reviewers") || (c.containsKey("reviewers") && !(IntentJs.get(c.get("reviewers"), "keys") instanceof List))) return "reviewers must be {keys: [...]}";
+        if (c.containsKey("call_context")) {
+            boolean ok = c.get("call_context") instanceof List;
+            if (ok) for (Object x : (List<?>) c.get("call_context")) if (!(x instanceof String)) ok = false;
+            if (!ok) return "call_context must be an array of strings";
+        }
+        if (!optMap(c, "actions")) return "actions must be an object";
+        if (c.containsKey("actions")) for (String k : new String[] {"records", "keys", "reapprovals"}) if (!optList(c.get("actions"), k)) return "actions." + k + " must be an array";
         if (!optMap(c, "params")) return "params must be an object";
+        if (!optMap(c, "env")) return "env must be an object";
         for (String k : new String[] {"schema", "session", "acc"}) if (!optMap(c, k)) return k + " must be an object";
         if (!optMap(c, "map")) return "map must be an object";
         if (c.containsKey("map")) for (String k : IntentJs.obj(c.get("map")).keySet()) if (!k.equals("disclosure")) return "map: unknown member '" + k + "'";
         if (c.containsKey("layers")) {
             if (!isMap(c.get("layers"))) return "layers must be an object";
             for (Map.Entry<String, Object> e : IntentJs.obj(c.get("layers")).entrySet()) {
-                if (!List.of("org", "site", "std").contains(e.getKey())) return "layers: unknown member '" + e.getKey() + "'";
+                if (!NullSafe.list(List.of("org", "site", "std")).contains(e.getKey())) return "layers: unknown member '" + e.getKey() + "'";
                 if (!isMap(e.getValue()) || !(IntentJs.get(e.getValue(), "predicates") instanceof List)) return "layers." + e.getKey() + " must be {predicates: [...]}";
             }
         }
@@ -203,6 +223,9 @@ public final class IntentV2 {
     /** A failing step's reason, or null on pass. */
     private interface Step { String run(); }
 
+    /** The highest escalation tier a grant can name (action-pin.ts MAX_ESC_TIER): a grant without a pin caps no tier. */
+    private static final int MAX_ESC_TIER = 3;
+
     private static Object cget(Context ctx, String... path) { return ctx == null ? null : ctx.get(path); }
 
     // ---- rule 14 ----
@@ -224,6 +247,12 @@ public final class IntentV2 {
         String v = ActionSchema.verify(doc, ctx.get("schema", "keys"));
         if (v != null) return "schema does not verify: " + v;
         if (!IntentJs.get(doc, "aud").equals(p.get("aud"))) return "schema aud does not match the PCActn aud";
+        if (isV2(doc)) {
+            // rule 22, integrity half: the document's materialized floors and traits are recomputed, never trusted
+            Object reviewers = cget(ctx, "reviewers");
+            String fe = Actions.schemaFloorError(IntentJs.obj(doc), reviewers == null ? null : IntentJs.obj(reviewers));
+            if (fe != null) return "schema_floor_forged: " + fe;
+        }
         Object params = cget(ctx, "params");
         if (!(params instanceof Map)) return "no plaintext params to check against the schema (closed world needs them)";
         if (!Pca.paramsDigest(params).equals(IntentJs.get(p.get("action"), "params_digest"))) return "params do not hash to action.params_digest";
@@ -231,6 +260,11 @@ public final class IntentV2 {
         if (!c.ok) return "schema_violation: " + c.code + ": " + c.reason;
         matched[0] = doc;
         return null;
+    }
+
+    private static boolean isV2(Object doc) {
+        Double v = IntentJs.num(IntentJs.get(doc, "v"));
+        return v != null && v == 2;
     }
 
     private static String verbOf(Map<String, Object> p) { return IntentRevocation.jsText(IntentJs.get(p.get("action"), "verb"), IntentJs.own(p.get("action"), "verb")); }
@@ -488,7 +522,10 @@ public final class IntentV2 {
             run(out, "schema", clockOk, () -> {
                 Object[] matched = new Object[1];
                 String why = schemaStep(p, ctx, matched);
-                if (why == null) out.env.put("canon", ActionSchema.canonProjection(matched[0], verbOf(p), IntentJs.obj(ctx.get("params"))));
+                if (why == null) {
+                    out.schemaDoc = matched[0];
+                    out.env.put("canon", ActionSchema.canonProjection(matched[0], verbOf(p), IntentJs.obj(ctx.get("params"))));
+                }
                 return why;
             });
         }
@@ -507,7 +544,7 @@ public final class IntentV2 {
                 actx.put("action", action);
                 actx.put("env", env);
                 Object layers = ctx.get("layers");
-                for (String k : new String[] {"org", "site", "std"}) {
+                for (String k : LAYER_KEYS) {
                     if (!IntentJs.own(layers, k)) continue;
                     Object layer = IntentJs.get(layers, k);
                     if (IntentJs.obj(layer).size() != 1) return "layers: the " + k + " ceiling is malformed (null or not {predicates: [...]})";
@@ -552,11 +589,135 @@ public final class IntentV2 {
                     if (wb.prov != null) out.env.put("prov", wb.prov);
                     if (wb.cls != null) out.env.put("class", wb.cls);
                 }
+                if (wb.singleSource != null) out.singleSource = new ArrayList<>(wb.singleSource); // IntentWB sets it only when non-empty
             }
         } else if (mapActive) {
             run(out, "map", clockOk, () -> mapStep(p, ctx));
         }
+        modelRules(p, grant, ctx, out, clockOk, action);
         return out;
+    }
+
+    /** The predicate lists a model-derived path could widen: the grant's allow-list and the ceilings (V5 layers). */
+    private static List<Object> allowSidePredicates(Map<String, Object> env, Context ctx) {
+        List<Object> lists = new ArrayList<>();
+        lists.add(env == null ? null : env.get("predicates"));
+        Object layers = ctx == null ? null : ctx.get("layers");
+        for (String k : LAYER_KEYS) lists.add(IntentJs.get(IntentJs.get(layers, k), "predicates")); // layers is a map or null (contextError)
+        return lists;
+    }
+
+    /**
+     * Rules 20 and 21, evaluated last (after {@code classes}, so the verifier-computed env is complete). Both read the signed
+     * ENVELOPE of the stored grant: {@code units} (20) is reported iff {@code envelope.units} is present; {@code tighten} (21)
+     * iff {@code envelope.tighten} or a {@code model_polarity} (envelope or policy) is present, or a grant-side {@code where}
+     * reads a model-derived env path (so that case is refused, never silently skipped). A PCActn with none of these verifies
+     * exactly as a verifier without the two rules.
+     */
+    private static void modelRules(Map<String, Object> p, Map<String, Object> grant, Context ctx, Decision out, boolean clockOk, Map<String, Object> action) {
+        Map<String, Object> env = Authorize.readEnvelope(grant);
+        List<Object> preds = allowSidePredicates(env, ctx);
+        boolean pinned = env != null && env.containsKey("actions");
+        // the schema check's document, else one schema step shared by pin, traits and units: {why, doc}
+        Object[][] memo = {out.schemaDoc != null ? new Object[] {null, out.schemaDoc} : null};
+        java.util.function.Supplier<Object[]> schemaFor = () -> {
+            if (memo[0] == null) {
+                Object[] matched = new Object[1];
+                String why = schemaStep(p, ctx, matched);
+                memo[0] = new Object[] {why, matched[0]};
+            }
+            return memo[0];
+        };
+        if (pinned) {
+            run(out, "pin", clockOk, () -> {
+                Object[] s = schemaFor.get();
+                if (s[0] != null) return (String) s[0];
+                Map<String, Object> in = new LinkedHashMap<>();
+                in.put("pin", env.get("actions"));
+                in.put("doc", s[1]);
+                in.put("verb", action.get("verb"));
+                for (String k : new String[] {"records", "keys", "reapprovals"}) in.put(k, ctx.get("actions", k)); // decidePin reads an absent member as empty
+                Map<String, Object> g = new LinkedHashMap<>();
+                g.put("id", grant.get("id"));
+                g.put("issuer", grant.get("issuer"));
+                in.put("grant", g);
+                Map<String, Object> d = ActionRegistry.decidePin(in);
+                if (Boolean.TRUE.equals(d.get("ok"))) return null;
+                return (Boolean.TRUE.equals(d.get("escalate")) ? "escalate: " : "") + d.get("code") + ": " + d.get("reason")
+                    + (d.containsKey("needs_reapproval") ? " (re-approve diff " + d.get("needs_reapproval") + ")" : "");
+            });
+        }
+        boolean traits = out.schemaDoc != null && isV2(out.schemaDoc);
+        if (!traits && pinned) {
+            // a throw here left the pin check failed above (the reference throws on: refused either way)
+            try { traits = isV2(schemaFor.get()[1]); } catch (RuntimeException | StackOverflowError e) { traits = false; }
+        }
+        if (traits) {
+            run(out, "traits", clockOk, () -> {
+                Object[] s = schemaFor.get(); // traits is true only for a document the schema step accepted
+                Object pinO = pinned && ActionRegistry.actionPinError(env.get("actions")) == null ? env.get("actions") : null;
+                List<Object> caveats = new ArrayList<>();
+                if (env != null) for (Object c : (List<?>) env.get("caveats")) if (IntentJs.get(c, "type") instanceof String) caveats.add(IntentJs.get(c, "type"));
+                if (IntentJs.get(pinO, "caveats") instanceof List) caveats.addAll((List<?>) IntentJs.get(pinO, "caveats"));
+                Map<String, Object> g = new LinkedHashMap<>();
+                g.put("caveats", caveats);
+                g.put("max_esc", IntentJs.own(pinO, "max_esc") ? IntentJs.get(pinO, "max_esc") : (Object) Long.valueOf(MAX_ESC_TIER));
+                g.put("preauth_esc", IntentJs.own(pinO, "preauth_esc") ? IntentJs.get(pinO, "preauth_esc") : (Object) Long.valueOf(0));
+                boolean hasContext = ctx.has("call_context");
+                @SuppressWarnings("unchecked") List<Object> context = hasContext ? (List<Object>) ctx.get("call_context") : new ArrayList<>();
+                String d = ActionRegistry.rule22Decide(IntentJs.obj(s[1]), (String) action.get("verb"), g, context);
+                if ("allow".equals(d)) return null;
+                return "escalate".equals(d) ? "escalate: the action floors need a caveat, context or confirmation the grant does not provide (rule 22)"
+                    : "the action floors exceed what the grant authorizes (rule 22)";
+            });
+        }
+        if (env != null && env.containsKey("units")) {
+            run(out, "units", clockOk, () -> {
+                Object[] s = schemaFor.get();
+                if (s[0] != null) return (String) s[0];
+                Object doc = s[1];
+                Map<String, Object> verb = ActionSchema.schemaVerb(doc, verbOf(p));
+                Map<String, Object> in = new LinkedHashMap<>();
+                in.put("units", env.get("units"));
+                if (IntentJs.own(doc, "units")) in.put("schema_units", IntentJs.get(doc, "units"));
+                in.put("verb_params", verb.get("params")); // schemaStep passed: conform() found the verb and read its params object
+                in.put("verb", verbOf(p));
+                in.put("predicates", preds);
+                net.atlasauth.pca.Decision.UnitsResult d = net.atlasauth.pca.Decision.decideUnits(in);
+                return failWhy(d.ok, d.reason);
+            });
+        }
+        Object polPolicy = ctx == null ? null : ctx.get("policy", "model_polarity");
+        boolean polDefined;
+        Object polarity = null;
+        if ("strict".equals(polPolicy)) polDefined = false;
+        else if (polPolicy != null) { polDefined = true; polarity = polPolicy; }
+        else if (env != null && env.containsKey("model_polarity")) { polDefined = true; polarity = env.get("model_polarity"); }
+        else polDefined = false;
+        boolean hasTighten = env != null && env.containsKey("tighten");
+        if (hasTighten || polDefined || (ctx != null && ctx.has("policy", "model_polarity"))
+            || !net.atlasauth.pca.Decision.modelPathsRead(preds, out.singleSource).isEmpty()) {
+            final boolean pd = polDefined;
+            final Object pol = polarity;
+            run(out, "tighten", clockOk, () -> {
+                Map<String, Object> in = new LinkedHashMap<>();
+                in.put("predicates", preds);
+                if (hasTighten) in.put("tighten", env.get("tighten"));
+                if (pd) in.put("polarity", pol);
+                in.put("single_source", new ArrayList<Object>(out.singleSource));
+                Map<String, Object> cenv = new LinkedHashMap<>();
+                Object hostEnv = ctx == null ? null : ctx.get("env");
+                if (hostEnv instanceof Map) cenv.putAll(IntentJs.obj(hostEnv));
+                cenv.putAll(out.env);
+                Map<String, Object> cx = new LinkedHashMap<>();
+                cx.put("action", action);
+                cx.put("env", cenv);
+                in.put("context", cx);
+                net.atlasauth.pca.Decision.TightenResult r = net.atlasauth.pca.Decision.decideTighten(in);
+                if (r.legacy) out.legacyModelPolarity = true;
+                return failWhy("ok".equals(r.outcome), r.reason);
+            });
+        }
     }
 
     /**
@@ -571,6 +732,9 @@ public final class IntentV2 {
         Object eps = ctx.get("policy", "map", "max_residual_risk_ppm");
         IntentMap.Decision d = IntentMap.decide(IntentJs.get(p.get("intent"), "map_digest"), p.containsKey("action") ? p.get("action") : new LinkedHashMap<String, Object>(),
             ctx.has("params"), ctx.get("params"), ctx.get("map", "disclosure"), ctx.has("policy", "map", "max_residual_risk_ppm") ? IntentJs.num(eps) : null);
-        return d.ok ? null : d.reason;
+        return failWhy(d.ok, d.reason);
     }
+
+    /** A step's verdict as a check reason: null iff ok; a failure always carries a reason (fail closed, like the reference's bad(reason ?? 'refused')). */
+    static String failWhy(boolean ok, String reason) { return ok ? null : reason != null ? reason : "refused"; }
 }

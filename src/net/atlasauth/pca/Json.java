@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * non-JSON whitespace, duplicate keys (after unescaping), lone surrogates (raw or escaped), raw control characters
  * in strings, unknown escapes, nesting deeper than {@link #MAX_DEPTH}, input longer than {@link #MAX_CHARS}
  * UTF-8 bytes, and any number not in the canonical wire form (see {@link #numberError}).
- * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files): it has no depth cap.
+ * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files): it has no fixed depth cap; a document that overflows the stack is refused like any other.
  */
 public final class Json {
     private Json() {}
@@ -114,7 +114,13 @@ public final class Json {
     public static Object parse(String s) { return new Parser(s, true).top(); }
 
     /** Lenient RFC 8259 (fixtures only): duplicate keys / lone surrogates / any number allowed. */
-    public static Object parseLenient(String s) { return new Parser(s, false).top(); }
+    public static Object parseLenient(String s) {
+        try {
+            return new Parser(s, false).top();
+        } catch (StackOverflowError e) { // no fixed cap (JSON.parse has none), but a deep document is an ordinary refusal for every caller
+            throw new IllegalArgumentException("JSON nesting too deep");
+        }
+    }
 
     private static boolean dig(char c) { return c >= '0' && c <= '9'; }
 
@@ -291,10 +297,18 @@ public final class Json {
         return sb.toString();
     }
 
-    /** Bytewise UTF-8 comparison of two strings (== Unicode code point order). */
+    private static final java.util.regex.Pattern LONE_SURROGATE = java.util.regex.Pattern.compile("[\\uD800-\\uDFFF]"); // a pair is one code point, so only a lone one matches
+
+    /**
+     * Bytewise UTF-8 comparison of two strings (== Unicode code point order), as the reference's compareUtf8: a lone surrogate encodes as
+     * U+FFFD (Java's encoder writes '?'), and equal bytes (only lone surrogates can do that) fall back to UTF-16 code-unit order.
+     */
     static int compareUtf8(String a, String b) {
-        return Arrays.compareUnsigned(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+        int d = Arrays.compareUnsigned(utf8Fffd(a), utf8Fffd(b));
+        return d != 0 ? d : a.compareTo(b);
     }
+
+    private static byte[] utf8Fffd(String s) { return LONE_SURROGATE.matcher(s).replaceAll("\uFFFD").getBytes(StandardCharsets.UTF_8); }
 
     private static void jsString(StringBuilder sb, String s, boolean strict) {
         if (strict && hasLoneSurrogate(s)) throw new IllegalArgumentException("canonicalize: lone surrogate in string");
@@ -315,16 +329,16 @@ public final class Json {
                     } else if (Character.isHighSurrogate(c)) {
                         if (i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1))) {
                             sb.append(c).append(s.charAt(++i));
-                        } else sb.append('�');
+                        } else sb.append(String.format("\\u%04x", (int) c)); // JSON.stringify: a lone surrogate is escaped
                     } else if (Character.isLowSurrogate(c)) {
-                        sb.append('�'); // lenient only (strict rejected above)
+                        sb.append(String.format("\\u%04x", (int) c)); // lenient only (strict rejected above)
                     } else sb.append(c);
             }
         }
         sb.append('"');
     }
 
-    /** Lenient number formatting: canonical lexemes are already the shortest round-trip form. */
+    /** Lenient number formatting: JavaScript's String(n) of the double the lexeme reads as (canonical lexemes already are that text). */
     static String fmtNumber(String raw) {
         if (numberError(raw) == null) return raw;
         double f;
@@ -332,8 +346,26 @@ public final class Json {
             throw new IllegalArgumentException("canonicalize: non-finite number");
         }
         if (Double.isInfinite(f) || Double.isNaN(f)) throw new IllegalArgumentException("canonicalize: non-finite number");
-        if (f == 0) return "0";
-        return new BigDecimal(Double.toString(f)).stripTrailingZeros().toPlainString();
+        return AttestCommon.jsNumString(f); // exponent form at >= 1e21 and < 1e-6 (1e+21, 1e-7); -0 prints "0"
+    }
+
+    /**
+     * The shortest decimal that reads back as {@code a} (finite, &gt; 0); among equally short ones the closest to its exact value,
+     * a tie to the even last digit (ECMA-262 Number::toString). Double.toString is not shortest before JDK 19.
+     */
+    static BigDecimal shortest(double a) {
+        BigDecimal x = new BigDecimal(a);
+        for (int p = 1; ; p++) {
+            BigDecimal lo = x.round(new java.math.MathContext(p, java.math.RoundingMode.FLOOR));
+            BigDecimal hi = x.round(new java.math.MathContext(p, java.math.RoundingMode.CEILING));
+            boolean okLo = lo.doubleValue() == a, okHi = hi.doubleValue() == a;
+            if (okLo && okHi) {
+                int c = hi.subtract(x).compareTo(x.subtract(lo));
+                return (c < 0 || c == 0 && !hi.unscaledValue().testBit(0) ? hi : lo).stripTrailingZeros();
+            }
+            if (okLo) return lo.stripTrailingZeros();
+            if (okHi) return hi.stripTrailingZeros();
+        }
     }
 
     @SuppressWarnings("unchecked")
