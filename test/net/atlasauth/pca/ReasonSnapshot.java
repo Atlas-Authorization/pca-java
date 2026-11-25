@@ -103,8 +103,8 @@ public final class ReasonSnapshot {
                 Pca.IntentPolicy ip = (ctx.get("intent_policy_json") instanceof String ? Pca.IntentPolicy.fromJsonText((String) ctx.get("intent_policy_json")) : Pca.IntentPolicy.fromJson(ctx.get("intent_policy")));
                 IntentV2.Context v2 = (ctx.containsKey("intent_v2") ? IntentV2.Context.fromJson(ctx.get("intent_v2")) : null);
                 Pca.Verdict g = v.containsKey("pcactn_json")
-                    ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed, ip, v2)
-                    : Pca.verifyPcactn(v.get("pcactn"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed, ip, v2);
+                    ? Pca.verifyPcactnJson((String) v.get("pcactn_json"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed, ip, v2, null, Pca.PlanRoots.SKIP)
+                    : Pca.verifyPcactn(v.get("pcactn"), (Map<String, Object>) v.get("grant"), Json.asLong(ctx.get("now")), (String) ctx.get("aud"), allowed, ip, v2, null, Pca.PlanRoots.SKIP);
                 val = g.allow + "|" + g.checks + "|" + esc(g.reason);
             } catch (Throwable t) { val = "THROW:" + t.getClass().getSimpleName() + ":" + esc(t.getMessage()); }
             out.put(tag + ":v:" + v.get("name"), val);
@@ -205,7 +205,7 @@ public final class ReasonSnapshot {
                     Pca.Verdict g = Pca.verifyPcactnJson(raw, grant, Json.asLong(c.get("now")), (String) c.get("aud"), allowed,
                         c.get("intent_policy_json") instanceof String ? Pca.IntentPolicy.fromJsonText((String) c.get("intent_policy_json"))
                             : Pca.IntentPolicy.fromJson(c.get("intent_policy")),
-                        (c.containsKey("intent_v2") ? IntentV2.Context.fromJson(c.get("intent_v2")) : null));
+                        (c.containsKey("intent_v2") ? IntentV2.Context.fromJson(c.get("intent_v2")) : null), null, Pca.PlanRoots.SKIP);
                     val = g.allow + "|" + g.checks + "|" + esc(g.reason);
                 } catch (Throwable t) { val = "THROW:" + t.getClass().getSimpleName() + ":" + esc(t.getMessage()); }
             } else {

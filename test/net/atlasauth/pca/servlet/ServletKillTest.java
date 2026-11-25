@@ -229,7 +229,7 @@ public class ServletKillTest {
         assertEquals("clock", assertThrows(NullPointerException.class, () -> new PcaFilter(aud, resolver(), null)).getMessage());
         assertEquals("pca", PcaFilter.ATTRIBUTE);
         // default clock is the system clock: the fixture (year 2027) is in the future => denied (not a NPE)
-        PcaFilter sys = new PcaFilter(aud, resolver());
+        PcaFilter sys = PcaFilter.signatureOnly(aud, resolver());
         MockHttpServletRequest req = new MockHttpServletRequest();
         req.addHeader("PCA-Action", hdr(json));
         MockHttpServletResponse resp = new MockHttpServletResponse();
@@ -241,7 +241,7 @@ public class ServletKillTest {
 
     @Test void filterNonHttp() throws Exception {
         init();
-        PcaFilter f = new PcaFilter(aud, resolver(), clock);
+        PcaFilter f = PcaFilter.signatureOnly(aud, resolver(), clock);
         ServletRequest sr = (ServletRequest) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {ServletRequest.class}, (p, m, a) -> { throw new IllegalStateException(m.getName()); });
         ServletResponse sp = (ServletResponse) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {ServletResponse.class}, (p, m, a) -> { throw new IllegalStateException(m.getName()); });
         boolean[] called = new boolean[1];
@@ -263,7 +263,7 @@ public class ServletKillTest {
 
     @Test void filterHeaderTransportDoesNotTouchBody() throws Exception {
         init();
-        PcaFilter f = new PcaFilter(aud, resolver(), clock);
+        PcaFilter f = PcaFilter.signatureOnly(aud, resolver(), clock);
         MockHttpServletRequest req = new MockHttpServletRequest() {
             @Override public ServletInputStream getInputStream() { throw new AssertionError("body must not be read when the header is present"); }
         };
@@ -278,7 +278,7 @@ public class ServletKillTest {
 
     @Test void filterBodyTransport() throws Exception {
         init();
-        PcaFilter f = new PcaFilter(aud, resolver(), clock);
+        PcaFilter f = PcaFilter.signatureOnly(aud, resolver(), clock);
         byte[] body = ("{\"pcactn\":" + json + "}").getBytes(StandardCharsets.UTF_8);
         for (String blank : new String[] {null, ""}) {
             MockHttpServletRequest req = new MockHttpServletRequest();
@@ -333,7 +333,7 @@ public class ServletKillTest {
         req.setCharacterEncoding("ISO-8859-1");
         MockFilterChain chain = new MockFilterChain();
         MockHttpServletResponse r1 = new MockHttpServletResponse();
-        new PcaFilter(aud, resolver(), clock).doFilter(req, r1, chain);
+        PcaFilter.signatureOnly(aud, resolver(), clock).doFilter(req, r1, chain);
         assertNull(chain.getRequest());
         assertEquals(401, r1.getStatus());
         assertTrue(r1.getContentAsString().contains("request body is not valid UTF-8"), r1.getContentAsString());
@@ -344,7 +344,7 @@ public class ServletKillTest {
         req.setCharacterEncoding("ISO-8859-1");
         chain = new MockFilterChain();
         r1 = new MockHttpServletResponse();
-        new PcaFilter(aud, resolver(), clock).doFilter(req, r1, chain);
+        PcaFilter.signatureOnly(aud, resolver(), clock).doFilter(req, r1, chain);
         HttpServletRequest down = (HttpServletRequest) chain.getRequest();
         assertNotNull(down, r1.getContentAsString());
         assertTrue(down.getReader().lines().collect(java.util.stream.Collectors.joining("\n")).endsWith("\"x\":\"\u00c3\u00a9\"}"));
@@ -352,7 +352,7 @@ public class ServletKillTest {
         req.setContent(("{\"pcactn\":" + json + ",\"x\":\"é\"}").getBytes(StandardCharsets.UTF_8));
         req.setCharacterEncoding("bogus-charset");
         chain = new MockFilterChain();
-        new PcaFilter(aud, resolver(), clock).doFilter(req, new MockHttpServletResponse(), chain);
+        PcaFilter.signatureOnly(aud, resolver(), clock).doFilter(req, new MockHttpServletResponse(), chain);
         down = (HttpServletRequest) chain.getRequest();
         assertNotNull(down);
         assertTrue(down.getReader().lines().collect(java.util.stream.Collectors.joining("\n")).endsWith("\"x\":\"é\"}"));
@@ -361,14 +361,14 @@ public class ServletKillTest {
         req.setContent(("{\"pcactn\":" + json + ",\"x\":\"é\"}").getBytes(StandardCharsets.UTF_8));
         req.setCharacterEncoding((String) null);
         chain = new MockFilterChain();
-        new PcaFilter(aud, resolver(), clock).doFilter(req, new MockHttpServletResponse(), chain);
+        PcaFilter.signatureOnly(aud, resolver(), clock).doFilter(req, new MockHttpServletResponse(), chain);
         down = (HttpServletRequest) chain.getRequest();
         assertTrue(down.getReader().lines().collect(java.util.stream.Collectors.joining("\n")).endsWith("\"x\":\"é\"}"));
     }
 
     @Test void filterChallenge() throws Exception {
         init();
-        PcaFilter f = new PcaFilter(aud, resolver(), clock);
+        PcaFilter f = PcaFilter.signatureOnly(aud, resolver(), clock);
         MockHttpServletRequest req = new MockHttpServletRequest();
         MockHttpServletResponse resp = new MockHttpServletResponse();
         resp.setHeader("X-Stale", "1");
@@ -381,7 +381,7 @@ public class ServletKillTest {
         assertNull(resp.getHeader("X-Stale"));
                 assertEquals("PCA realm=\"pca\"", resp.getHeader("WWW-Authenticate"));
         assertEquals("application/json;charset=UTF-8", resp.getContentType());
-        String bodyText = "{\"error\":\"pca_required\",\"error_description\":\"no PCA-Action header and no PCActn body\"}";
+        String bodyText = "{\"error\":\"pca_required\",\"error_description\":\"no PCA-Action header and no PCActn body\",\"doc\":\"https://github.com/Atlas-Authorization/pca/blob/main/docs/reference/refusals.md\"}";
         assertEquals(bodyText, resp.getContentAsString());
         assertEquals(bodyText.getBytes(StandardCharsets.UTF_8).length, resp.getContentLength());
         assertEquals(String.valueOf(bodyText.length()), resp.getHeader("Content-Length"));
@@ -389,13 +389,13 @@ public class ServletKillTest {
         req = new MockHttpServletRequest();
         req.addHeader("PCA-Action", hdr(json));
         resp = new MockHttpServletResponse();
-        new PcaFilter("other", resolver(), clock).doFilter(req, resp, new MockFilterChain());
+        PcaFilter.signatureOnly("other", resolver(), clock).doFilter(req, resp, new MockFilterChain());
         assertEquals(403, resp.getStatus());
         assertEquals("PCA realm=\"pca\", error=\"insufficient_authority\"", resp.getHeader("WWW-Authenticate"));
         // multi-byte detail: the content length counts bytes
         req = new MockHttpServletRequest();
         resp = new MockHttpServletResponse();
-        new PcaFilter(aud, ref -> { throw new RuntimeException(); }, clock).doFilter(req, resp, new MockFilterChain());
+        PcaFilter.signatureOnly(aud, ref -> { throw new RuntimeException(); }, clock).doFilter(req, resp, new MockFilterChain());
         assertEquals(resp.getContentAsByteArray().length, resp.getContentLength());
     }
 
@@ -406,14 +406,14 @@ public class ServletKillTest {
         assertEquals("resolver", assertThrows(NullPointerException.class, () -> new PcaInterceptor(aud, null, clock)).getMessage());
         assertEquals("clock", assertThrows(NullPointerException.class, () -> new PcaInterceptor(aud, resolver(), null)).getMessage());
         assertEquals("pca", PcaInterceptor.ATTRIBUTE);
-        PcaInterceptor sys = new PcaInterceptor(aud, resolver());
+        PcaInterceptor sys = PcaInterceptor.signatureOnly(aud, resolver());
         MockHttpServletRequest req = new MockHttpServletRequest();
         req.addHeader("PCA-Action", hdr(json));
         MockHttpServletResponse resp = new MockHttpServletResponse();
         assertFalse(sys.preHandle(req, resp, new Object()));
         assertEquals(403, resp.getStatus());
 
-        PcaInterceptor it = new PcaInterceptor(aud, resolver(), clock);
+        PcaInterceptor it = PcaInterceptor.signatureOnly(aud, resolver(), clock);
         req = new MockHttpServletRequest();
         req.addHeader("PCA-Action", hdr(json));
         resp = new MockHttpServletResponse();
@@ -430,7 +430,7 @@ public class ServletKillTest {
         assertNull(resp.getHeader("X-Stale"));
         assertEquals("PCA realm=\"pca\"", resp.getHeader("WWW-Authenticate"));
         assertEquals("application/json;charset=UTF-8", resp.getContentType());
-        String bodyText = "{\"error\":\"pca_required\",\"error_description\":\"no PCA-Action header and no PCActn body\"}";
+        String bodyText = "{\"error\":\"pca_required\",\"error_description\":\"no PCA-Action header and no PCActn body\",\"doc\":\"https://github.com/Atlas-Authorization/pca/blob/main/docs/reference/refusals.md\"}";
         assertEquals(bodyText, resp.getContentAsString());
         assertEquals(bodyText.length(), resp.getContentLength());
         assertNull(req.getAttribute("pca"));

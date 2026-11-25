@@ -1,0 +1,103 @@
+name: ZK
+
+# adapters/pca-zk: Groth16 verification of snarkjs artifacts (BN254, BLS12-381) through JNA over libpcazk, built here from the flagship's crate.
+# Runs the 1429-case reference corpus of the zk compliance module (the core test, pairing stood in) and the corpus's verify cases against the real library.
+on:
+  push:
+    branches: [main, 'ci/**']
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout (full shared corpus and the Groth16 crate from the flagship)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: libpcazk (cargo build --features capi)
+        run: echo "ATLAS_PCA_LIBPCAZK=$(.github/scripts/build-libpcazk.sh "$RUNNER_TEMP/pcazk" "$RUNNER_TEMP/mono/packages/pca-zk/crate" | tail -1)/libpcazk.so" >> "$GITHUB_ENV"
+      - name: Reference corpus replay (1429 cases; every function, a missing file fails)
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-zk.json.gz
+          mvn -B -ntp test -Dtest=ZkDiffTest
+      - name: Install the core library
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q install -DskipTests
+      - name: Verify cases of the corpus over libpcazk (both curves, compatible and strict mode)
+        working-directory: ${{ env.PCA_MONO_SDK }}/adapters/pca-zk
+        env:
+          ATLAS_PCA_LIBPCAZK_REQUIRED: '1'
+        run: mvn -B -ntp test
+
+  # The prover contract case (provePolicyVmCompliance/roundtrip) needs the full Policy-VM circuit build: the witness calculator AND a proving key,
+  # which the flagship's circuit job does not publish (its artifact holds only the witness calculators, for one day). So this job compiles the
+  # circuit and runs the flagship's dev-only single-party setup (2^18 powers of tau: hours and several GB), then proves the sample witness
+  # through libpcazk. On demand and on tags only.
+  prove-policyvm:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      CIRCOM_URL: https://github.com/iden3/circom/releases/download/v2.2.2/circom-linux-amd64
+      CIRCOM_SHA256: f3d8d1fdbc123779b80e210c909ee941d7a1e130c70365524646b48b8b0fe9d5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout (full shared corpus and the Groth16 crate from the flagship)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - name: The circuit sources from the flagship
+        shell: bash
+        run: git -C "$RUNNER_TEMP/pca-flagship" sparse-checkout add packages/pca/circuits packages/pca/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: circom (pinned release, sha256-checked) and snarkjs
+        shell: bash
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/circom" "$CIRCOM_URL"
+          echo "$CIRCOM_SHA256  $RUNNER_TEMP/circom" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/circom"
+          echo "CIRCOM=$RUNNER_TEMP/circom" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/nm" && cd "$RUNNER_TEMP/nm" && npm init -y >/dev/null && npm install --no-audit --no-fund snarkjs@0.7.5 circomlib@2.0.5
+          ln -s "$RUNNER_TEMP/nm/node_modules" "$RUNNER_TEMP/pca-flagship/packages/pca/node_modules"
+      - name: Dev-only setup of the Policy-VM circuit (throwaway key, never published)
+        shell: bash
+        working-directory: ${{ runner.temp }}/pca-flagship/packages/pca
+        env:
+          PCA_DEV_SETUP: '1'
+        run: bash circuits/policyvm.setup.sh
+      - name: libpcazk (cargo build --features capi)
+        run: echo "ATLAS_PCA_LIBPCAZK=$(.github/scripts/build-libpcazk.sh "$RUNNER_TEMP/pcazk" "$RUNNER_TEMP/mono/packages/pca-zk/crate" | tail -1)/libpcazk.so" >> "$GITHUB_ENV"
+      - name: Install the core library
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q install -DskipTests
+      - name: Prove the sample witness (the recorded public signals, a verifying proof)
+        working-directory: ${{ env.PCA_MONO_SDK }}/adapters/pca-zk
+        env:
+          ATLAS_PCA_LIBPCAZK_REQUIRED: '1'
+          PCA_ZK_PROVE_REQUIRED: '1'
+          PCA_ZK_POLICYVM_WASM: ${{ runner.temp }}/pca-flagship/packages/pca/circuits/build/policyvm_js/policyvm.wasm
+          PCA_ZK_POLICYVM_ZKEY: ${{ runner.temp }}/pca-flagship/packages/pca/circuits/build/policyvm_final.zkey
+          PCA_ZK_POLICYVM_VKEY: ${{ runner.temp }}/pca-flagship/packages/pca/circuits/policyvm_vkey.json
+        run: mvn -B -ntp test -Dtest=NativeZkTest

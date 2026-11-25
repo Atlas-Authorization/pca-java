@@ -104,7 +104,7 @@ public class PqChainTest {
                 assertEquals("hop 0: bad signature (not signed by expected key)", Pca.verifyChain(new ArrayList<>(List.of(badEd)), issuer, true, null, pins, null));
             }
             // suite policy
-            assertEquals("hop 0: signature suite is not allowed by this verifier's suite policy", Pca.verifyChain(chain, issuer, true, List.of("ed25519"), pins, null));
+            assertEquals("hop 0: signature suite '" + alg + "' is not allowed by this verifier's suite policy", Pca.verifyChain(chain, issuer, true, List.of("ed25519"), pins, null));
             assertEquals("", Pca.verifyChain(chain, issuer, true, List.of(alg), pins, null));
         }
     }

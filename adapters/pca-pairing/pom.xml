@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>net.atlasauth</groupId>
+  <artifactId>pca-pairing</artifactId>
+  <version>0</version>
+  <description>Pairing-based PCA packages (BLS signature aggregation, BBS, ABE) on BLS12-381. A separate module so the core library gains no native dependency.</description>
+  <properties>
+    <pca.natives>${project.build.directory}/natives-in</pca.natives>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- the GT shim over blst (src/main/c); build it first, or pass -Dpca.gt.lib=/path/to/libpcagt.so -->
+    <pca.gt.lib>${project.build.directory}/native/libpcagt.so</pca.gt.lib>
+  </properties>
+  <dependencies>
+    <!-- the PCA Java library, installed into the local Maven repository first; the core pom gains nothing -->
+    <dependency><groupId>net.atlasauth</groupId><artifactId>pca-mutation</artifactId><version>0</version>
+      <exclusions><exclusion><groupId>jakarta.servlet</groupId><artifactId>jakarta.servlet-api</artifactId></exclusion></exclusions></dependency>
+    <!-- supranational blst (audited, constant-time, Apache-2.0) via its JVM binding, natives bundled; the only pairing implementation used -->
+    <dependency><groupId>tech.pegasys</groupId><artifactId>jblst</artifactId><version>0.3.18</version></dependency>
+    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.3</version><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <!-- per-platform native libraries (natives/<os>-<arch>/...) staged by the release workflow; absent in a plain source build -->
+    <resources><resource><directory>${pca.natives}</directory></resource></resources>
+    <plugins>
+      <plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version></plugin>
+      <plugin><artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version>
+        <configuration><argLine>-Dpca.gt.lib=${pca.gt.lib}</argLine></configuration></plugin>
+    </plugins>
+  </build>
+</project>

@@ -59,6 +59,14 @@ public final class OracleFacts {
         return null;
     }
 
+    /** The lower median of a non-empty list of integers (index floor((n-1)/2) ascending). */
+    public static long lowerMedian(List<Long> xs) {
+        if (xs == null || xs.isEmpty()) throw new IllegalArgumentException("lowerMedian: empty");
+        List<Long> s = new ArrayList<>(xs);
+        java.util.Collections.sort(s);
+        return s.get((s.size() - 1) / 2);
+    }
+
     /** {@code x === 1} for a JSON number. */
     static boolean isOne(Object v) { Double d = IntentJs.num(v); return d != null && d == 1.0; }
 

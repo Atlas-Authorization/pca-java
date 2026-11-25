@@ -1,0 +1,201 @@
+name: Native adapters
+
+# The opt-in native modules ship their libraries inside their own jar, at natives/<os>-<arch>/ (extracted to a private temp dir on first use,
+# net.atlasauth.pca.NativeLibs), so a user adds the dependency and nothing else. Built here on each platform's own runner:
+#   pca-pairing     libpcagt  blst v0.3.16 + GT shim + JNI wrapper        linux x64/arm64, macOS x64/arm64, windows x64
+#   pca-mpc-lwe-ot  liblweot  cargo --features capi                        linux x64/arm64, macOS x64/arm64, windows x64
+#   pca-fndsa       libfndsa  cargo --features capi                        linux x64/arm64, macOS x64/arm64, windows x64
+#   pca-zk          libpcazk  cargo --features capi (arkworks)             linux x64/arm64, macOS x64/arm64, windows x64
+#   pca-fhe-seal    libsealc  Microsoft SEAL 4.1.2 C export (static deps)  linux x64/arm64, macOS x64/arm64, windows x64 (sealc.dll, MSVC)
+#   core (LESS)     libatlas_less  sdks/pca-less-c                         linux x64/arm64, macOS x64/arm64, windows x64 (atlas_less.dll, mingw-w64; needs Java 22+ FFM)
+# The sandbox module (pca-wasm-chicory) is pure Java and needs no native library; OpenSSL is not used by this SDK.
+# Each jar is then installed on a clean runner (no checkout, no toolchain, no env vars) and its library is loaded and called.
+on:
+  push:
+    branches: ['ci/**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SEAL_TAG: v4.1.2
+  SEAL_COMMIT: 119dc32e135cb89c1062076a69310d4413ebc824
+  BLST_TAG: v0.3.16
+
+jobs:
+  build:
+    name: build ${{ matrix.plat }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { plat: linux-x64,   os: ubuntu-latest,    jni: linux,  gt: libpcagt }
+          - { plat: linux-arm64, os: ubuntu-24.04-arm, jni: linux,  gt: libpcagt }
+          - { plat: macos-x64,   os: macos-15-intel,   jni: darwin, gt: libpcagt }
+          - { plat: macos-arm64, os: macos-latest,     jni: darwin, gt: libpcagt }
+          - { plat: windows-x64, os: windows-latest,   jni: win32,  gt: pcagt,    seal: true }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout (flagship crates for the Rust libraries)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Stage directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          S="$RUNNER_TEMP/stage"
+          for m in core pca-pairing pca-mpc-lwe-ot pca-fndsa pca-zk pca-fhe-seal; do mkdir -p "$S/$m/natives/${{ matrix.plat }}"; done
+          echo "STAGE=$S" >> "$GITHUB_ENV"
+      - name: pcagt (blst at the pinned commit + GT shim + JNI wrapper)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 --branch "$BLST_TAG" https://github.com/supranational/blst "$RUNNER_TEMP/blst"
+          C="$PCA_MONO_SDK/adapters/pca-pairing/src/main/c"
+          J="$(cygpath -u "$JAVA_HOME" 2>/dev/null || echo "$JAVA_HOME")"
+          PCA_GT_EXTRA_SRC="$C/pca_gt_jni.c" PCA_GT_EXTRA_CFLAGS="-I$J/include -I$J/include/${{ matrix.jni }}" \
+            .github/scripts/build-libpcagt.sh "$RUNNER_TEMP/blst" "$C/pca_gt.c" "$STAGE/pca-pairing/natives/${{ matrix.plat }}" ${{ matrix.gt }}
+      - name: liblweot, libfndsa and libpcazk (cargo --features capi)
+        shell: bash
+        run: |
+          set -euo pipefail
+          .github/scripts/build-liblweot.sh "$RUNNER_TEMP/lweot" "$RUNNER_TEMP/mono/packages/pca-mpc-lwe-ot-wasm/crate"
+          cp "$RUNNER_TEMP"/lweot/*lweot.* "$STAGE/pca-mpc-lwe-ot/natives/${{ matrix.plat }}/"
+          .github/scripts/build-libfndsa.sh "$RUNNER_TEMP/fndsa" "$RUNNER_TEMP/mono/packages/pca-fndsa-wasm/crate"
+          cp "$RUNNER_TEMP"/fndsa/*fndsa.* "$STAGE/pca-fndsa/natives/${{ matrix.plat }}/"
+          .github/scripts/build-libpcazk.sh "$RUNNER_TEMP/pcazk" "$RUNNER_TEMP/mono/packages/pca-zk/crate"
+          cp "$RUNNER_TEMP"/pcazk/*pcazk.* "$STAGE/pca-zk/natives/${{ matrix.plat }}/"
+          rm -f "$STAGE"/pca-*/natives/*/*.h
+      - name: libsealc
+        shell: bash
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5" # SEAL's bundled zlib declares cmake_minimum_required below 3.5; CMake 4 (macOS runners) rejects that
+          CFLAGS: ${{ runner.os == 'macOS' && '-Dfdopen=fdopen' || '' }} # SEAL's bundled zlib 1.2.11 stubs fdopen out on macOS, which clashes with the current SDK header; predefining the name skips the stub
+        run: |
+          set -euo pipefail
+          # the build script clones the tag; the tag must still point at the reviewed commit
+          test "$(git ls-remote https://github.com/microsoft/SEAL "refs/tags/$SEAL_TAG" | cut -f1)" = "$SEAL_COMMIT"
+          d="$(.github/scripts/build-libsealc.sh "$SEAL_TAG" "$RUNNER_TEMP/sealc" | tail -1)"
+          f="$(find "$d" -maxdepth 1 \( -name 'libsealc.so*' -o -name 'libsealc*.dylib' -o -name 'sealc.dll' \) | head -1)"
+          case "$f" in *.dylib) out=libsealc.dylib ;; *.dll) out=sealc.dll ;; *) out=libsealc.so ;; esac
+          cp -L "$f" "$STAGE/pca-fhe-seal/natives/${{ matrix.plat }}/$out"
+      - name: libatlas_less
+        shell: bash
+        run: |
+          set -euo pipefail
+          p="$(bash "$RUNNER_TEMP/pca-flagship/sdks/pca-less-c/build.sh" "$RUNNER_TEMP/less" | tail -1)"
+          cp "$p" "$STAGE/core/natives/${{ matrix.plat }}/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: natives-${{ matrix.plat }}
+          path: ${{ runner.temp }}/stage
+          if-no-files-found: error
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: natives-*
+          path: stage
+          merge-multiple: true
+      - name: Core jar (carries the LESS library), then each module jar with its libraries
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          set -euo pipefail
+          S="$GITHUB_WORKSPACE/stage"; D="$GITHUB_WORKSPACE/dist"
+          mvn -B -ntp -q install -DskipTests -Dpca.natives="$S/core"
+          for m in pca-pairing pca-mpc-lwe-ot pca-fndsa pca-zk pca-fhe-seal; do
+            ( cd adapters/$m
+              mvn -B -ntp -q package -DskipTests -Dpca.natives="$S/$m"
+              mvn -B -ntp -q dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory="$D/$m"
+              cp target/$m-*.jar "$D/$m/" )
+          done
+          # every platform's library must be in its jar
+          for f in pca-pairing:pcagt pca-mpc-lwe-ot:lweot pca-fndsa:fndsa pca-zk:pcazk pca-fhe-seal:sealc; do
+            m=${f%%:*}; n=${f##*:}; c=$(unzip -l "$D/$m/$m-0.jar" | grep -c "natives/.*$n")
+            echo "$m: $c libraries"; [ "$c" -ge 5 ] || { echo "::error::$m jar carries $c native libraries"; exit 1; }
+          done
+          [ "$(unzip -l "$D/pca-pairing/pca-mutation-0.jar" | grep -c 'natives/.*atlas_less')" -ge 5 ] || { echo "::error::core jar lacks the LESS libraries"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: java-native-jars
+          path: dist
+          if-no-files-found: error
+
+  smoke:
+    name: install and load ${{ matrix.os }}
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-latest, windows-latest]
+    steps:
+      # no checkout: only the built jars and their runtime dependencies are on the class path
+      - uses: actions/download-artifact@v4
+        with:
+          name: java-native-jars
+          path: dist
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Load each module's library from its jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > Smoke.java <<'JAVA'
+          public class Smoke {
+              public static void main(String[] a) throws Exception {
+                  Class<?> c = Class.forName(a[0]);
+                  Object r = a[0].endsWith(".Gt") ? c.getMethod("isElement", byte[].class).invoke(null, (Object) new byte[576])
+                                                  : c.getMethod("available").invoke(null);
+                  Object want = a[0].endsWith(".Gt") ? Boolean.FALSE : Boolean.TRUE;
+                  if (!want.equals(r)) throw new IllegalStateException(a[0] + " returned " + r);
+                  System.out.println(a[0] + " ok");
+              }
+          }
+          JAVA
+          run() { java -cp "dist/$1/*" Smoke.java "$2"; }
+          run pca-pairing net.atlasauth.pca.pairing.Gt
+          run pca-mpc-lwe-ot net.atlasauth.pca.mpc.lwe.Lattice
+          run pca-fndsa net.atlasauth.pca.fndsa.NativeFnDsa
+          run pca-zk net.atlasauth.pca.zk.NativeZk
+          run pca-fhe-seal net.atlasauth.pca.fhe.seal.FheSeal
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '22'
+      - name: LESS library from the core jar (FFM, Java 22)
+        shell: bash
+        run: |
+          cat > Less.java <<'JAVA'
+          public class Less {
+              public static void main(String[] a) {
+                  if (!net.atlasauth.pca.LessNative.available()) throw new IllegalStateException("LESS library not loaded");
+                  System.out.println("LESS ok");
+              }
+          }
+          JAVA
+          java --enable-native-access=ALL-UNNAMED -cp "dist/pca-pairing/*" Less.java

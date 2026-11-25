@@ -21,15 +21,15 @@ jobs:
   test:
     name: ${{ matrix.os }} / JDK ${{ matrix.java }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 50 # windows: ~10 min setup + ~18 min of tests (the slowest class, 148 s) + the replay steps took 30 min
     env:
-      JDK_JAVA_OPTIONS: ${{ matrix.java != '17' && '--enable-native-access=ALL-UNNAMED' || '' }}
+      JDK_JAVA_OPTIONS: ${{ matrix.java != '21' && '--enable-native-access=ALL-UNNAMED' || '' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        # 17 = the compile floor (release 17); 23 runs LESS through the FFM API (JDK 22+), with native access enabled
-        java: ['17', '23']
+        # 21 = the compile floor (release 21, lazysodium-java 5.2.0); 23 runs LESS through the FFM API (JDK 22+), with native access enabled
+        java: ['21', '23']
         include:
           - { os: windows-latest, java: '23' }
           - { os: macos-latest, java: '23' }
@@ -40,23 +40,491 @@ jobs:
       # (../../tools/pca-audit from the repo): rebuild it from the flagship at the same ref and test there
       - name: Source layout (full shared corpus from the flagship)
         shell: bash
-        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca $([ "$RUNNER_OS" = Windows ] || [ "${{ matrix.java }}" = 17 ] || echo --less)
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca $([ "$RUNNER_OS" = Windows ] || [ "${{ matrix.java }}" = 21 ] || echo --less)
+      # CI makes WasmSubprocessTest fail when the pinned host is absent: build the reference host from the flagship crate (exports PCA_WASMTIME_HOST_BIN and PCA_WASMTIME_HOST_SHA256)
+      - name: pca-wasmtime-host (real host for the subprocess sandbox tests)
+        shell: bash
+        run: .github/scripts/build-wasmtime-host.sh "$RUNNER_TEMP/wasmtime-host" "$RUNNER_TEMP/mono/packages/pca-sandbox/wasmtime-host"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: RSA DPoP oracle corpus (generated, never committed)
+        shell: bash
+        run: |
+          P="$PCA_MONO_SDK/test-data/ref-dpop-rsa.json.gz"; command -v cygpath >/dev/null && P="$(cygpath -u "$P")"
+          .github/scripts/dpop-rsa-corpus.sh "$P"
+      - name: Secret-key oracle corpora (generated, never committed)
+        shell: bash
+        run: |
+          D="$PCA_MONO_SDK/test-data"; command -v cygpath >/dev/null && D="$(cygpath -u "$D")"
+          .github/scripts/gen-secret-corpus.sh "$D" oprf:oprf core-frost-java:core-frost-java mpc-ot:mpc-ot attest-eat:attest-eat frost-dkg:frost-dkg
+      - name: libsodium (ristretto255 / Ed25519 backend)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y libsodium-dev; elif [ "$RUNNER_OS" = macOS ]; then brew install libsodium; fi
       - uses: actions/setup-java@v4
+        id: jdk
+        continue-on-error: true  # a transient download failure must not leave the later steps on the runner's default JDK
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
           cache: maven
+      - name: JDK again from another vendor when the first setup failed
+        if: steps.jdk.outcome == 'failure'
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - name: The job runs on the expected JDK
+        shell: bash
+        run: |
+          java -version 2>&1
+          java -version 2>&1 | grep -q 'version "'${{ matrix.java }} || { echo "::error::the expected JDK is not the active JDK"; exit 1; }
       - name: Build + unit tests
         working-directory: ${{ env.PCA_MONO_SDK }}
         run: mvn -B -ntp test
+      - name: Agent-side signing (producer vectors byte for byte, TS PCActns verified, native round trips; a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s ../../packages/pca/conformance/producer-vectors.json
+          mvn -B -ntp -q surefire:test -Dtest='ProducerVectorsTest,ProducerTest'
+          test -s "$PCA_PRODUCER_OUT"
+        env:
+          PCA_PRODUCER_OUT: ${{ runner.temp }}/producer-native-java.json
+      # the post-quantum PCActns this SDK produced (randomised signatures): the reference implementation verifies them
+      # (packages/pca/conformance/producer-native/, producer-native.test.ts)
+      - name: Upload the post-quantum PCActns for the reference
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && matrix.java == '23' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: producer-native-java
+          path: ${{ runner.temp }}/producer-native-java.json
+          if-no-files-found: error
+      # 0.5 parity suites. Already part of the step above; run on their own so a regression shows as its own step. Every
+      # shared vector file they read (decision, passport incl. passport_hardware_vectors, attestation-evidence, intent-state,
+      # ledger, optimistic, mesh, goal) must exist: a missing file or table FAILS, it is never skipped.
+      - name: Decision + model-rules vectors (units, tighten-only, decision lattice, escalation answers, signed model-rules cases)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='DecisionConformanceTest,EscalationTest,DecisionKillTest,ModelRulesVectorsTest'
+      - name: Caveat language v2 vectors (discharges, sealed, narrow, max_uses, derive, spiffe_bound; shared caveat-lang-vectors.json, a missing file fails, never skips)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s ../../packages/pca/conformance/caveat-lang-vectors.json
+          mvn -B -ntp -q surefire:test -Dtest='CaveatLangVectorsTest'
+      - name: Forbid-wins certificate and linked policy template vectors (a missing file fails, never skips)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='PolicyAuthoringTest'
+      - name: Agent-native primitives (caution, rationale binding, tool-schema firewall, envelope introspection, authority leases; the shared agent-native oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-agent-native.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AgentNativeDiffTest'
+      - name: Hybrid KEM (X25519 + ML-KEM-768/1024, X-Wing draft-09, FIPS 203 key checks) and QRNG entropy (health tests, HKDF mixing, secureSeed, injected-transport HTTP source; the shared oracles, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-kem.json.gz
+          test -s test-data/ref-entropy.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='KemDiffTest,EntropyDiffTest'
+      - name: Small public helpers (budget_alloc caveat, beacon acceptance and durable acceptor, fraud-proof filing, intent-map attestation, approval store and broker conformance cases, salted ledger commits, v2 goal parser, profile revocation scope, dispute game; a missing corpus fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-core-kotlin-gaps.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='SiblingPortsTest,CoreGapsDiffTest'
+      - name: zk compliance (statements, public-input derivation, envelope gate, context pins, backends, ceremony checks; the shared oracle, every case, a missing file fails; the pairing itself runs in the ZK workflow)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-zk.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ZkDiffTest'
+      - name: Prohibitions and contracts (advanceState, composeAuthority, validateWhen, whenMatches, clause validation, contract advance with CAS guards) and the derive-then-decide pipeline (the shared oracles, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          for c in ref-prohibitions ref-contracts ref-decide-derive; do test -s "test-data/$c.json.gz"; done
+          mvn -B -ntp -q surefire:test -Dtest='ProhibitionsContractsRefDiffTest,DecideDeriveDiffTest'
+      - name: Mesh issuing side and federation (domain and witness scripts, the worked example, capability translation, the federated budget, cross-references; the shared oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-mesh-issue.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='MeshIssueRefDiffTest'
+      - name: Post-quantum quorum sets, proofs and rotation chains (set building and loading, shares, the quorum verifier, rotation certificates; the shared oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-pq-threshold-quorum.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='PqQuorumRefDiffTest'
+      - name: Safety certificate (the risk-budget bound, check rows, issue and verify under the ed25519, ML-DSA-65 and hybrid suites, the compliance row; the shared oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-safety-certificate.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='SafetyCertificateRefDiffTest'
+      - name: Older shared oracles replayed on their own (chain compaction, receipts and underwriting; the schema-derived outcome space; policy-ci lint, test and coverage; rule-14 action schemas; session histories; the wire JSON Schemas and the structural validator; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          for c in ref-core-sweep-java ref-intent-schema ref-policy-ci-java-extra base-actionschema base-intenthistory ref-schema; do test -s "test-data/$c.json.gz"; done
+          mvn -B -ntp -q surefire:test -Dtest='CoreSweepDiffTest,IntentSchemaDiffTest,PolicyCiAnalyzerDiffTest,BaseActionSchemaDiffTest,BaseIntentHistoryDiffTest,SchemaDiffTest'
+      - name: Connector action catalog (defineAction, buildCatalog over JSON rows, the fail-closed resolveAction, catalogDigest and its pin, the no-downgrade extendCatalog; the shared oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-catalog.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='CatalogRefDiffTest'
+      - name: Budget forecaster (forecast over the simulator with default, custom and empty catalogs, recommendPolicy, autonomyBoundOf; the shared oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-budget-forecast.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='BudgetForecastRefDiffTest'
+      - name: Reputation input validator and the fail-closed score edges (reasons compared exactly, the record cap; the shared oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-reputation.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ReputationRefDiffTest'
+      - name: Policy debugger (explainRisk, explainDecision, applyDelta, counterfactual, auditPCActn; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-policy-debug.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='PolicyDebugRefDiffTest'
+      - name: Guardian-set high availability and the fenced leader lease (quorum, degrade, signer order, fence guard, scripted lease lifecycles with store faults; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-ha.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='HaRefDiffTest'
+      - name: Taint lattice, label registry, ref classification and labelled taint result (every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-taint.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='TaintRefDiffTest'
+      - name: Frontier signal typing (semantic, progress, objective signals and tightenRiskInputs with signed zeros; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-frontier-signals.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='FrontierSignalsRefDiffTest'
+      - name: Objective risk (canonical action, inverse registry, resource graph, native and BYO embedders, goal commitment, calibration, harm currency, composed risk, dispute oracle; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-objective-risk.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ObjectiveRiskRefDiffTest'
+      - name: Proof of progress (potentials, goal commitment, step and trajectory verification, signed steps, state attestations, tracker; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-progress.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ProgressRefDiffTest'
+      - name: Software attestation (binding, dev attestor documents, registry, nonce store and entropy gate, agent-binding match, verifyAttestation and its hook, multi-root verifier, evidence anchoring; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-attestation-soft.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AttestationRefDiffTest'
+      - name: AMD SEV-SNP evidence helpers (report parser, P-384 key and signature helpers, report signature, VCEK certificate helpers and binding, policy gate, identity derivation, KDS fetch over an injected transport; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-sevsnp-helpers.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='SevSnpHelpersRefDiffTest'
+      - name: Seeded connector provider catalog (each provider constant, its invariants, catalog order and digest, ids outside the catalog; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-connectors-providers.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ConnectorsProvidersRefDiffTest'
+      - name: Post-quantum software attestation root (statement minting under every signing suite, construction refusals, verifier across ML-DSA, SLH-DSA and hybrid suites; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-attest-pq-software.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AttestPqSoftwareRefDiffTest'
+      - name: PUF attestation root (repetition-code fuzzy extractor, simulated PUF, TPM endorsement-key provider over an injected runner, enrollment, device attestor, registry, verifier; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-attest-puf.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AttestPufRefDiffTest'
+      - name: Allowlist manifests and their transparency anchor (verify under every suite, durable rollback floor, create / sign / revoke, projection and policy fields, anchor operator and verifier, the committed anchor vectors; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-attest-allowlist.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AttestAllowlistRefDiffTest'
+      - name: Semantic judge threshold (quantization, signed statement and message, verdict signing under three suites, verification with PQ pins, judge attestation gate, k-of-n threshold with attestation and calibration, verifier hook, risk contribution; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-semantic-threshold.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='SemanticThresholdRefDiffTest'
+      - name: Liveness beacons and the kill switch (issue, signed message, reference, verification, monotonic acceptance, frozen check, durable acceptor with a failing store; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-beacons.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='BeaconsRefDiffTest'
+      - name: Agent passport (fingerprint, binding match, registry, trust score, evidence binding, signing under three suites, verification with revocation and hardware evidence, assurance; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-passport.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AgentPassportRefDiffTest'
+      - name: Action schema surface (constants, value-dependent reversibility, wallet floor, verb lookup, signing, key entries, digests, verification, MCP hints, MCP and OpenAPI drafting importers; both corpora, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-action-schema.json.gz
+          test -s test-data/ref-action-schema-draft.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ActionSchemaRefDiffTest'
+      - name: Action pin signing half (constants, registry document and evolution record signing under three suites, key entries, principal re-approval, verification of what they sign; every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-action-pin.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ActionPinRefDiffTest'
+      - name: Natural-language approval (the shared oracle, 206 cases, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-nl-approval.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='NlApprovalRefDiffTest'
+      - name: "Resource-server verdict (the shared oracle, 1022 cases: allow, risk, required threshold, every check, exact reasons, budget, assurance; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-verify-verdict.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ServerVerifyRefDiffTest'
+      - name: "Networked FROST signing (the shared oracle, 634 cases: allow tokens, proof of possession, equivocation guard, signer service, coordinator, nonce store, hybrid co-sign, PQ quorum; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-frost-net.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='FrostNetRefDiffTest,FrostNetHttpTest'
+      - name: "FROST distributed key generation (the shared oracle, 439 committed + 286 generated cases: rounds, complaints, blame, echo agreement, finalize, simulation, wire codec, inbox, network, framing, party driver; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-frost-dkg.json.gz
+          test -s test-data/ref-frost-dkg-gen.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='FrostDkgRefDiffTest'
+      - name: Small public names of the reference (pcactnDigest, recharge, pqPinFor, tree-head equivocation, trait lattice, need param)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='PartCSmallSurfaceTest,ThresholdVerifyTest,AttestVendorsApiTest'
+      - name: FROST DKG over real mutual-TLS links and the signer runner as separate processes
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          mvn -B -ntp -q surefire:test -Dtest='FrostDkgTlsNodeTest,FrostNetRunnerTest'
+      - name: Attestation and zk verifier hooks (core verifier and authorize)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-zk.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='VerifierHooksTest,AuthorizeHooksEndToEndTest'
+      - name: "Azure MAA key trust and the release-signed pins (the shared oracle, 261 cases: guarded fetch, JWKS evaluation, rotation-safe store, signed re-pin, corroboration, built-in pins; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-attest-maa.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AttestMaaKeysRefDiffTest'
+      - name: "NVIDIA GPU-CC modules (the shared oracles, 467 + 163 cases: SPDM report, device chain, RIM XMLDSig, golden comparison, CRL and OCSP revocation, the OCSP request build, the collateral hook, the fetch helpers; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-attest-nvidia.json.gz
+          test -s test-data/ref-attest-nvidia-rim.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AttestNvidiaRefDiffTest'
+      - name: "Vendor attestation public functions (the shared oracle, 758 cases over 22 functions: constants, quote and report parsers, PCK chain, genuine quote, CRL, signed JSON, PCS collateral, runtime-data binding, JWT parsers, x5c chains, JWKS fetchers over a scripted transport; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-attest-vendors.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='AttestVendorsRefDiffTest'
+      - name: "Blue control protocol (the shared oracle, 362 cases: the example agent and its review battery, the example blue, every episode decision through the real stack, the example evaluation; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-control-blue.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='ControlBlueRefDiffTest,ControlEvalsExampleDiffTest,ControlEvalsDiffTest'
+      - name: "Intent leftovers (the shared oracle, 770 cases: the signed intent-required question and its problem, strict-artifact helpers, classifier verdicts and attestation gate, accumulator receipt and key set signing, admission and settlement through a session store; a missing file fails)"
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-intent-misc2.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='IntentMisc2RefDiffTest'
+      - name: Console, kill-switch set, sessions, DLP, immune baseline, policy simulator and lint, settlement evidence (the shared research oracle, every case, a missing file fails)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s test-data/ref-core-research-java.json.gz
+          mvn -B -ntp -q surefire:test -Dtest='CoreResearchDiffTest'
+      - name: Passport + attestation verifiers (vendor vectors, strict DER, fail-closed tables)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='PassportConformanceTest,PassportKillTest,AttestFoundationTest,AttestStrictDerTest,AttestX509VectorsTest,AttestAmdTest,AttestIntelTest,AttestMaaTest,AttestGcpTest,AttestNvidiaTest'
+      - name: Intent-state, ledger, optimistic and mesh vectors
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='IntentStateVectorsTest,LedgerVectorsTest,OptimisticVectorsTest,MeshConformanceTest,MeshNarrowsTest,Track3KillTest'
+      - name: Goal vectors (digests, decisions with witnesses, helper functions)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='GoalVectorsTest,GoalKillTest'
+      - name: Goal binding v3 (approved_goal) commit, invalid and binding vectors
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='GoalCommitVectorsTest'
+      - name: Revocation staleness (age caps, per-class windows, signed epoch, gate, authorize wiring)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='StalenessVectorsTest'
+      - name: Operation records and plan lifecycle (vector replay, concurrency, durable store, executor, authorize plans)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='OperationVectorsTest,PlanVectorsTest'
+      - name: Assurance labels (signature levels, reports, requirement gate, multi-root level, authorize gate)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='AssuranceVectorsTest'
+      - name: Guard options (servlet filter, Spring interceptor, PcaCore; approved goal, staleness, assurance, executor, maturity)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='GuardOptionsTest'
+      - name: Step-up client for the principal device (RFC 8032 vectors, stores, fake transport)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='StepUpClientTest'
+      - name: Public surface closed against the reference (PQ suites, hash agility, approval channels, small helpers corpus, regex request budget, kv state store)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='PqSurfaceTest,PcaSurfaceTest,SmallSurfaceDiffTest,ApprovalChannelsDiffTest,RegexBudgetRequestTest,AtomicKvStateStoreTest'
+      - name: Durable state store (hash-chained journal, lock generations, fences, quarantine, operator recovery; the 232-scenario reference corpus)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='DurableStateDiffTest'
+      - name: Undo-window coordinator (admission, durable record, veto, at-most-once compensation, finalize, veto relay, notifier)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='UndoCoordinatorTest'
+      - name: Agent HTTP client (plan commit, signed actions, step-up polling, receipt checks, delegation)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='PcaAgentTest'
+      - name: Store conformance helper (shipped stores pass, racy and non-durable stores fail)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='StoreConformanceTest'
+      - name: K3 operational-plane vectors + fresh_at member (consistency tokens, policy bundles, decision log, list receipts, grant management)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s ../../packages/pca/conformance/missing-context-vectors.json
+          mvn -B -ntp -q surefire:test -Dtest='K3VectorsTest,FreshAtVectorsTest,PcaGrantVectorsTest,BlueprintVectorsTest,A2aVectorsTest,K4VectorsTest,K5VectorsTest,BreakGlassVectorsTest,LeaseVectorsTest,MissingContextVectorsTest,ObligationsVectorsTest,PolicyClassesVectorsTest,ProvenanceVectorsTest,SigstoreVectorsTest'
+      - name: K5 workflow gate inside authorize + tokenisation vault and aggregate reads (shared fixtures; a missing file fails, never skips)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s ../../packages/pca/conformance/authorize-workflow-fixtures.json
+          test -s ../../packages/pca/conformance/vault-aggregate-vectors.json
+          mvn -B -ntp -q surefire:test -Dtest='AuthorizeWorkflowTest,GuardWorkflowTest,ReadVaultTest'
+      - name: Provenance by default + undo windows (arg-provenance-vectors, undo-vectors, authorize gate and undo admission; a missing file fails, never skips)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          test -s ../../packages/pca/conformance/arg-provenance-vectors.json
+          test -s ../../packages/pca/conformance/undo-vectors.json
+          mvn -B -ntp -q surefire:test -Dtest='ArgProvenanceVectorsTest,ArgProvenanceKillTest,UndoVectorsTest,UndoKillTest,ProvenanceFlowTest'
+      - name: actions-vectors (action kit, ActionDef parse, canonical digest, trait expansion, floor check, schema v2, pack proofs)
+        if: ${{ !cancelled() }}
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q surefire:test -Dtest='ActionVectorsTest'
       - name: Conformance corpus
         if: ${{ !cancelled() }}
         shell: bash
         working-directory: ${{ env.PCA_MONO_SDK }}
         run: |
-          mvn -B -ntp -q dependency:copy -Dartifact=org.bouncycastle:bcprov-jdk18on:${BC_VERSION} -DoutputDirectory=.ci
-          BC=".ci/bcprov-jdk18on-${BC_VERSION}.jar"
+          mvn -B -ntp -q dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=.ci/lib
+          BC=".ci/lib/*"
           SEP=':'; [ "$RUNNER_OS" = Windows ] && SEP=';'
           mkdir -p .ci/out
-          javac -cp "$BC" -d .ci/out src/net/atlasauth/pca/*.java ConformanceTest.java
+          find src -name "*.java" > .ci/sources.txt
+          javac -cp "$BC" -d .ci/out @.ci/sources.txt ConformanceTest.java
           java -Xss8m -cp ".ci/out${SEP}${BC}" ConformanceTest
