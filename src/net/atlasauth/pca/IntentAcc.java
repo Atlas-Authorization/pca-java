@@ -32,19 +32,19 @@ public final class IntentAcc {
     public static final long DEFAULT_MAX_RECEIPT_AGE_MS = 900_000L;
     /** Default bound on a key set's age, policy {@code acc.max_keyset_age_s} (1 h). */
     public static final long DEFAULT_MAX_KEYSET_AGE_MS = 3_600_000L;
-    static final List<String> ACC_AGGS = List.of("sum", "count", "distinct", "max");
-    static final List<String> MONITOR_KINDS = List.of("requires_prior", "precedes", "never", "always", "responds_within");
+    static final List<String> ACC_AGGS = NullSafe.list(List.of("sum", "count", "distinct", "max"));
+    static final List<String> MONITOR_KINDS = NullSafe.list(List.of("requires_prior", "precedes", "never", "always", "responds_within"));
     static final Pattern ACC_ID_RE = Pattern.compile("[A-Za-z0-9_]{1,64}");
     static final Pattern KID_RE = Pattern.compile("[A-Za-z0-9_.:-]{1,64}");
     private static final Pattern PARAM_PATH_RE = Pattern.compile("action\\.params\\.[A-Za-z0-9_]{1,64}");
     private static final Pattern UNIT_RE = Pattern.compile("[a-z0-9_]+(?:\\.[a-z0-9_]+)*");
-    private static final List<String> RECEIPT_KEYS = List.of("v", "kind", "session", "acc", "seq", "pre", "delta", "post", "pcactn_digest", "aud", "issued_at",
-        "expires_at", "kid", "ledger", "signer", "alg", "pq_pk", "sig", "pq_sig");
+    private static final List<String> RECEIPT_KEYS = NullSafe.list(List.of("v", "kind", "session", "acc", "seq", "pre", "delta", "post", "pcactn_digest", "aud", "issued_at",
+        "expires_at", "kid", "ledger", "signer", "alg", "pq_pk", "sig", "pq_sig"));
 
     private static boolean idOk(Object v) { return v instanceof String && ACC_ID_RE.matcher((String) v).matches(); }
     private static boolean declIdOk(Object v) { return idOk(v) && !ActionSchema.RESERVED_NAMES.contains(v); }
     private static boolean onlyKeys(Map<?, ?> m, String... allowed) {
-        List<String> a = List.of(allowed);
+        List<String> a = NullSafe.list(List.of(allowed));
         for (Object k : m.keySet()) if (!a.contains(k)) return false;
         return true;
     }
@@ -87,15 +87,15 @@ public final class IntentAcc {
     static String accumulatorDeclError(Object aO) {
         if (!(aO instanceof Map)) return "accumulator must be an object";
         Map<String, Object> a = IntentJs.obj(aO);
-        for (String k : a.keySet()) if (!List.of("id", "agg", "val", "unit", "sel", "win", "key", "domain_max", "cap", "holder").contains(k)) return "accumulator: unknown member '" + k + "'";
+        for (String k : a.keySet()) if (!NullSafe.list(List.of("id", "agg", "val", "unit", "sel", "win", "key", "domain_max", "cap", "holder")).contains(k)) return "accumulator: unknown member '" + k + "'";
         if (!declIdOk(a.get("id"))) return "accumulator id must match [A-Za-z0-9_]{1,64} and not be __proto__ / constructor / prototype";
         String at = "accumulator '" + a.get("id") + "'";
-        if (!(a.get("agg") instanceof String) || !ACC_AGGS.contains(a.get("agg"))) return at + ": unknown agg";
+        if (!ACC_AGGS.contains(a.get("agg"))) return at + ": unknown agg"; // a non-string (null included) is never listed
         if (a.containsKey("val") && (!(a.get("val") instanceof String) || !PARAM_PATH_RE.matcher((String) a.get("val")).matches())) return at + ": val must be action.params.<name>";
         if (a.containsKey("unit") && (!(a.get("unit") instanceof String) || ((String) a.get("unit")).length() > 64 || !UNIT_RE.matcher((String) a.get("unit")).matches())) return at + ": unit must be a unit id";
         if (!(a.get("sel") instanceof Map)) return at + ": sel must be an object";
         Map<String, Object> sel = IntentJs.obj(a.get("sel"));
-        for (String k : sel.keySet()) if (!List.of("verbs", "accumulates_into", "event").contains(k)) return at + ": sel has unknown member '" + k + "'";
+        for (String k : sel.keySet()) if (!NullSafe.list(List.of("verbs", "accumulates_into", "event")).contains(k)) return at + ": sel has unknown member '" + k + "'";
         if (sel.containsKey("verbs")) {
             Object vs = sel.get("verbs");
             boolean ok = vs instanceof List && !((List<?>) vs).isEmpty() && ((List<?>) vs).size() <= 64;
@@ -104,7 +104,7 @@ public final class IntentAcc {
         }
         if (sel.containsKey("accumulates_into") && (!(sel.get("accumulates_into") instanceof String) || !UNIT_RE.matcher((String) sel.get("accumulates_into")).matches()))
             return at + ": sel.accumulates_into must be a unit id";
-        if (sel.containsKey("event") && (!(sel.get("event") instanceof String) || !List.of("intent_required", "question", "clarification").contains(sel.get("event")))) return at + ": unknown sel.event";
+        if (sel.containsKey("event") && !NullSafe.list(List.of("intent_required", "question", "clarification")).contains(sel.get("event"))) return at + ": unknown sel.event";
         boolean actionSel = sel.containsKey("verbs") || sel.containsKey("accumulates_into");
         if (actionSel == sel.containsKey("event")) return at + ": sel names actions (verbs / accumulates_into) or a wallet event, exactly one kind";
         if (!(a.get("win") instanceof Map)) return at + ": win must be an object";
@@ -127,7 +127,7 @@ public final class IntentAcc {
         if ("site_local".equals(hk) || "wallet".equals(hk)) {
             if (h.size() != 1) return at + ": holder " + hk + " has no other member";
         } else if ("sequenced".equals(hk)) {
-            for (String k : h.keySet()) if (!List.of("kind", "uri", "root", "root_alg", "root_pq_pk", "keys_uri").contains(k)) return at + ": holder sequenced has unknown member '" + k + "'";
+            for (String k : h.keySet()) if (!NullSafe.list(List.of("kind", "uri", "root", "root_alg", "root_pq_pk", "keys_uri")).contains(k)) return at + ": holder sequenced has unknown member '" + k + "'";
             if (!(h.get("uri") instanceof String) || ((String) h.get("uri")).isEmpty()) return at + ": holder sequenced needs a uri";
             if (!IntentJs.b32(h.get("root"))) return at + ": holder.root is not canonical base64url (32 bytes)";
             String rse = IntentJs.suiteError(h.get("root_alg"), h.containsKey("root_alg"));
@@ -150,11 +150,11 @@ public final class IntentAcc {
     static String monitorDeclError(Object mO) {
         if (!(mO instanceof Map)) return "monitor must be an object";
         Map<String, Object> m = IntentJs.obj(mO);
-        for (String k : m.keySet()) if (!List.of("id", "kind", "p", "q", "status", "within").contains(k)) return "monitor: unknown member '" + k + "'";
+        for (String k : m.keySet()) if (!NullSafe.list(List.of("id", "kind", "p", "q", "status", "within")).contains(k)) return "monitor: unknown member '" + k + "'";
         if (!declIdOk(m.get("id"))) return "monitor id must match [A-Za-z0-9_]{1,64} and not be __proto__ / constructor / prototype";
         String at = "monitor '" + m.get("id") + "'";
         Object kind = m.get("kind");
-        if (!(kind instanceof String) || !MONITOR_KINDS.contains(kind)) return at + ": unknown kind";
+        if (!MONITOR_KINDS.contains(kind)) return at + ": unknown kind"; // a non-string (null included) is never listed
         if (!predicateShapeOk(m.get("p"))) return at + ": p must be a predicate";
         boolean needsQ = "requires_prior".equals(kind) || "precedes".equals(kind) || "responds_within".equals(kind);
         if (needsQ != m.containsKey("q")) return at + ": q is required exactly for requires_prior / precedes / responds_within";
@@ -202,7 +202,7 @@ public final class IntentAcc {
         }
         if (a.containsKey("val")) {
             String name = ((String) a.get("val")).substring("action.params.".length());
-            Object x = params.containsKey(name) ? params.get(name) : null;
+            Object x = params.get(name);
             return params.containsKey(name) && IntentJs.isNonNeg(x) ? new AccValue(null, IntentJs.lng(x), null) : new AccValue(a.get("val") + " must be a non-negative safe integer", 0, null);
         }
         Map<String, Object> v = schema != null ? ActionSchema.schemaVerb(schema, verb) : null;
@@ -332,7 +332,7 @@ public final class IntentAcc {
     static String keySetShapeError(Object kO) {
         if (!(kO instanceof Map)) return "key set is not an object";
         Map<String, Object> k = IntentJs.obj(kO);
-        for (String x : k.keySet()) if (!List.of("v", "kind", "sequencer", "version", "issued_at", "keys", "alg", "pq_pk", "sig", "pq_sig").contains(x)) return "key set: unknown member '" + x + "'";
+        for (String x : k.keySet()) if (!NullSafe.list(List.of("v", "kind", "sequencer", "version", "issued_at", "keys", "alg", "pq_pk", "sig", "pq_sig")).contains(x)) return "key set: unknown member '" + x + "'";
         if (!OracleFacts.isOne(k.get("v")) || !"pca-sequencer-keys".equals(k.get("kind"))) return "not a pca-sequencer-keys v1";
         if (!IntentJs.b32(k.get("sequencer"))) return "sequencer is not canonical base64url (32 bytes)";
         if (!(IntentJs.isNonNeg(k.get("version")) && IntentJs.num(k.get("version")) >= 1)) return "version must be a safe integer >= 1";

@@ -29,11 +29,15 @@ public final class LessNative {
     public static final int SIGNATURE_MIN_BYTES = 1153;
     public static final int SIGNATURE_MAX_BYTES = 1329;
     private static final int SIGNATURE_STEP_BYTES = 16;
+    /** The secret key is the 32-byte seed the public key is expanded from; keygen and sign take at least this many seed bytes. */
+    public static final int SECRET_KEY_BYTES = 32;
+    public static final int SEED_BYTES = 32;
 
     /** The FFM pieces used per call (null when LESS is unavailable). */
     private static final class Ffm {
-        MethodHandle verify;
-        Method arenaOfConfined, arenaAllocate, arenaClose, segOfArray, segCopyFrom;
+        MethodHandle verify, keygen, sign; // keygen / sign are null when the library predates the signing entry points
+        Method arenaOfConfined, arenaAllocate, arenaClose, segOfArray, segCopyFrom, segToArray;
+        Object byteLayout;
     }
 
     private static final Ffm FFM = load();
@@ -43,7 +47,8 @@ public final class LessNative {
 
     /** {@code n} is a signature length the parameter set produces. */
     public static boolean sigLenOk(int n) {
-        return n >= SIGNATURE_MIN_BYTES && n <= SIGNATURE_MAX_BYTES && (SIGNATURE_MAX_BYTES - n) % SIGNATURE_STEP_BYTES == 0;
+        int below = SIGNATURE_MAX_BYTES - n; // a produced length is MAX - k * STEP, at least MIN
+        return n >= SIGNATURE_MIN_BYTES && below >= 0 && below % SIGNATURE_STEP_BYTES == 0;
     }
 
     /** Candidate library paths, in order. */
@@ -52,6 +57,8 @@ public final class LessNative {
         String env = System.getenv("ATLAS_PCA_LIBLESS");
         if (env == null || env.isEmpty()) env = System.getProperty("atlas.pca.libless", "");
         for (String p : env.split(java.io.File.pathSeparator)) if (!p.isEmpty()) out.add(Paths.get(p));
+        String packaged = NativeLibs.extract(LessNative.class, "atlas_less"); // after an explicit override, before the repo build directory
+        if (packaged != null) out.add(Paths.get(packaged));
         for (Path d = Paths.get(System.getProperty("user.dir", ".")).toAbsolutePath(); d != null; d = d.getParent()) {
             Path build = d.resolve("sdks").resolve("pca-less-c").resolve("build");
             if (!Files.isDirectory(build)) continue;
@@ -82,7 +89,10 @@ public final class LessNative {
             Object sizeDesc = descOf.invoke(null, jLong, Array.newInstance(layoutC, 0));
             Object[] args = (Object[]) Array.newInstance(layoutC, 6);
             for (int i = 0; i < 6; i++) args[i] = i % 2 == 0 ? address : jLong;
-            Object verifyDesc = descOf.invoke(null, jInt, args);
+            Object verifyDesc = descOf.invoke(null, jInt, args); // (ptr, len, ptr, len, ptr, len) -> int: verify and keygen share the shape
+            Object[] signArgs = (Object[]) Array.newInstance(layoutC, 9);
+            for (int i = 0; i < 9; i++) signArgs[i] = i % 2 == 0 ? address : jLong;
+            Object signDesc = descOf.invoke(null, jInt, signArgs);
             Method downcall = linkerC.getMethod("downcallHandle", segC, descC, optC.arrayType());
             Method find = lookupC.getMethod("find", String.class);
             for (Path path : candidates()) {
@@ -103,6 +113,14 @@ public final class LessNative {
                     if (!ok || v.isEmpty()) continue;
                     Ffm f = new Ffm();
                     f.verify = (MethodHandle) downcall.invoke(linker, v.get(), verifyDesc, Array.newInstance(optC, 0));
+                    Optional<?> kg = (Optional<?>) find.invoke(lookup, "atlas_less_cat1_keygen");
+                    Optional<?> sg = (Optional<?>) find.invoke(lookup, "atlas_less_cat1_sign");
+                    if (kg.isPresent() && sg.isPresent()) {
+                        f.keygen = (MethodHandle) downcall.invoke(linker, kg.get(), verifyDesc, Array.newInstance(optC, 0));
+                        f.sign = (MethodHandle) downcall.invoke(linker, sg.get(), signDesc, Array.newInstance(optC, 0));
+                    }
+                    f.byteLayout = valueC.getField("JAVA_BYTE").get(null);
+                    f.segToArray = segC.getMethod("toArray", Class.forName("java.lang.foreign.ValueLayout$OfByte"));
                     f.arenaOfConfined = arenaC.getMethod("ofConfined");
                     f.arenaAllocate = arenaC.getMethod("allocate", long.class);
                     f.arenaClose = arenaC.getMethod("close");
@@ -125,8 +143,8 @@ public final class LessNative {
         try {
             Object arena = FFM.arenaOfConfined.invoke(null);
             try {
-                Object[] segs = new Object[3];
                 byte[][] in = {pk, msg.length == 0 ? new byte[1] : msg, sig};
+                Object[] segs = new Object[in.length];
                 for (int i = 0; i < 3; i++) {
                     segs[i] = FFM.arenaAllocate.invoke(arena, (long) in[i].length);
                     FFM.segCopyFrom.invoke(segs[i], FFM.segOfArray.invoke(null, (Object) in[i]));
@@ -138,6 +156,77 @@ public final class LessNative {
             }
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /** True iff the loaded library carries the keygen and sign entry points. */
+    public static boolean canSign() { return FFM != null && FFM.keygen != null && FFM.sign != null; }
+
+    private static Object segOf(Object arena, byte[] in) throws ReflectiveOperationException {
+        Object seg = FFM.arenaAllocate.invoke(arena, (long) in.length);
+        FFM.segCopyFrom.invoke(seg, FFM.segOfArray.invoke(null, (Object) in));
+        return seg;
+    }
+
+    private static byte[] bytesOf(Object seg, int n) throws ReflectiveOperationException {
+        byte[] all = (byte[]) FFM.segToArray.invoke(seg, FFM.byteLayout);
+        return java.util.Arrays.copyOf(all, n);
+    }
+
+    /**
+     * Deterministic key pair from a seed of at least {@link #SEED_BYTES}: {@code {publicKey, secretKey}}. Throws
+     * IllegalStateException when the library (or its signing entry points) is unavailable or the call fails.
+     */
+    public static byte[][] keygen(byte[] seed) {
+        if (!canSign()) throw new IllegalStateException("LESS signing is unavailable: libatlas_less with the keygen entry point is not loaded");
+        if (seed == null || seed.length < SEED_BYTES) throw new IllegalArgumentException("a LESS seed is at least " + SEED_BYTES + " bytes");
+        try {
+            Object arena = FFM.arenaOfConfined.invoke(null);
+            try {
+                Object pk = FFM.arenaAllocate.invoke(arena, (long) PUBLIC_KEY_BYTES);
+                Object sk = FFM.arenaAllocate.invoke(arena, (long) SECRET_KEY_BYTES);
+                Object sd = segOf(arena, seed);
+                Object rc = FFM.keygen.invokeWithArguments(pk, (long) PUBLIC_KEY_BYTES, sk, (long) SECRET_KEY_BYTES, sd, (long) seed.length);
+                if ((int) rc != 1) throw new IllegalStateException("LESS keygen failed");
+                return new byte[][] {bytesOf(pk, PUBLIC_KEY_BYTES), bytesOf(sk, SECRET_KEY_BYTES)};
+            } finally {
+                FFM.arenaClose.invoke(arena);
+            }
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new IllegalStateException("LESS keygen failed", t);
+        }
+    }
+
+    /** Detached signature (1153..1329 bytes) of {@code msg} under {@code sk}, the signing RNG seeded from {@code seed} (at least 32 bytes). */
+    public static byte[] sign(byte[] sk, byte[] msg, byte[] seed) {
+        if (!canSign()) throw new IllegalStateException("LESS signing is unavailable: libatlas_less with the sign entry point is not loaded");
+        if (sk == null || sk.length != SECRET_KEY_BYTES) throw new IllegalArgumentException("a LESS secret key is " + SECRET_KEY_BYTES + " bytes");
+        if (msg == null) throw new IllegalArgumentException("message must be a byte array");
+        if (seed == null || seed.length < SEED_BYTES) throw new IllegalArgumentException("a LESS seed is at least " + SEED_BYTES + " bytes");
+        try {
+            Object arena = FFM.arenaOfConfined.invoke(null);
+            try {
+                Object skS = segOf(arena, sk);
+                Object msS = segOf(arena, msg.length == 0 ? new byte[1] : msg);
+                Object sdS = segOf(arena, seed);
+                Object sigS = FFM.arenaAllocate.invoke(arena, (long) SIGNATURE_MAX_BYTES);
+                Object lenS = FFM.arenaAllocate.invoke(arena, 8L);
+                Object rc = FFM.sign.invokeWithArguments(skS, (long) sk.length, msS, (long) msg.length, sdS, (long) seed.length,
+                    sigS, (long) SIGNATURE_MAX_BYTES, lenS);
+                if ((int) rc != 1) throw new IllegalStateException("LESS sign failed");
+                byte[] lb = bytesOf(lenS, 8);
+                long n = java.nio.ByteBuffer.wrap(lb).order(java.nio.ByteOrder.nativeOrder()).getLong();
+                if (n < SIGNATURE_MIN_BYTES || n > SIGNATURE_MAX_BYTES || !sigLenOk((int) n)) throw new IllegalStateException("LESS sign returned a wrong-length signature");
+                return bytesOf(sigS, (int) n);
+            } finally {
+                FFM.arenaClose.invoke(arena);
+            }
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new IllegalStateException("LESS sign failed", t);
         }
     }
 }

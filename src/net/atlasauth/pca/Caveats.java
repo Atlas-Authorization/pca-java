@@ -38,7 +38,7 @@ public final class Caveats {
         @Override public String toString() { return "Result{ok=" + ok + ", failed=" + failed + "}"; }
     }
 
-    static final List<String> REVERSIBILITY_ORDER = List.of("reversible", "rate_limited", "irreversible");
+    static final List<String> REVERSIBILITY_ORDER = NullSafe.list(List.of("reversible", "rate_limited", "irreversible"));
 
     /**
      * The ROOT grant's caveats the policy layer evaluates: {@code grant.caveats} without its FIRST {@code envelope} caveat
@@ -139,7 +139,6 @@ public final class Caveats {
             }
             case "reversibility_max": {
                 Object lim = cv.get("class"), cur = c.get("reversibility_class");
-                if (!(lim instanceof String) || !(cur instanceof String)) return false;
                 int li = REVERSIBILITY_ORDER.indexOf(lim), ci = REVERSIBILITY_ORDER.indexOf(cur);
                 return li >= 0 && ci >= 0 && ci <= li;
             }
