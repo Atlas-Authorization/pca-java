@@ -6,12 +6,15 @@
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- the maturity tier of this SDK (build metadata); Pca.MATURITY states the same value and a test keeps them equal -->
+    <pca.maturity>stable</pca.maturity>
   </properties>
   <dependencies>
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId><version>1.80</version></dependency>
     <dependency><groupId>jakarta.servlet</groupId><artifactId>jakarta.servlet-api</artifactId><version>6.0.0</version></dependency>
     <dependency><groupId>org.springframework</groupId><artifactId>spring-webmvc</artifactId><version>6.1.14</version></dependency>
     <dependency><groupId>org.springframework</groupId><artifactId>spring-test</artifactId><version>6.1.14</version><scope>test</scope></dependency>
+    <dependency><groupId>org.xerial</groupId><artifactId>sqlite-jdbc</artifactId><version>3.46.1.3</version><scope>test</scope></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>5.10.3</version><scope>test</scope></dependency>
   </dependencies>
   <build>
@@ -28,11 +31,22 @@
           <targetClasses><param>net.atlasauth.pca.*</param></targetClasses>
           <targetTests><param>MutationHarness</param><param>net.atlasauth.pca.*Test</param></targetTests>
           <mutators><mutator>ALL</mutator></mutators>
-          <timeoutConstant>8000</timeoutConstant>
+          <timeoutFactor>3.0</timeoutFactor>
+          <timeoutConstant>15000</timeoutConstant>
           <outputFormats><format>XML</format><format>HTML</format></outputFormats>
           <exportLineCoverage>true</exportLineCoverage>
           <failWhenNoMutations>false</failWhenNoMutations>
-          <jvmArgs><arg>-Xss8m</arg><arg>-Xmx1500m</arg></jvmArgs>
+          <!-- parseSurefireArgLine false: PIT appends surefire's argLine after jvmArgs, so surefire's -Xmx2g silently won over any heap set here.
+               G1, not ParallelGC: PIT's watchdog exits a minion when a pool passes 90%, and PS Old Gen (2/3 of the heap) holds promoted garbage
+               until a full GC. 3 GB per minion (4 minions on a 16 GB runner); the mutation workflow lists every MEMORY_ERROR in errs-<shard>.json.
+               ExitOnOutOfMemoryError: a test that dies of a real OutOfMemoryError would otherwise count as a kill; the exit makes that mutant a RUN_ERROR, which the merge gate refuses without a proof.
+               -OmitStackTraceInFastThrow: once JIT-compiled, implicit exceptions lose their message; a test that reads one then fails with no mutant to blame.
+               SoftRefLRUPolicyMSPerMB=0: the k05 oracle caches are soft references (up to 170 MB of JSON each); by default G1 keeps them until the
+               heap is nearly full, past the watchdog's 90% of G1 Old Gen, so every mutant of a widely covered method ended in MEMORY_ERROR (run 42249008120
+               shards 1 and 22). With 0 a GC clears them and the oracle is reloaded.
+               timeoutFactor 3 / 15 s: GC pauses of up to 3 s made behaviour-preserving mutants time out; the merge now needs a proof for every TIMED_OUT -->
+          <parseSurefireArgLine>false</parseSurefireArgLine>
+          <jvmArgs><arg>-Xss8m</arg><arg>-Xmx3g</arg><arg>-XX:ReservedCodeCacheSize=1g</arg><arg>-XX:+ExitOnOutOfMemoryError</arg><arg>-XX:-OmitStackTraceInFastThrow</arg><arg>-XX:SoftRefLRUPolicyMSPerMB=0</arg></jvmArgs>
         </configuration></plugin>
     </plugins>
   </build>
