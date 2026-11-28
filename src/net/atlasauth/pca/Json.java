@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * non-JSON whitespace, duplicate keys (after unescaping), lone surrogates (raw or escaped), raw control characters
  * in strings, unknown escapes, nesting deeper than {@link #MAX_DEPTH}, input longer than {@link #MAX_CHARS}
  * UTF-8 bytes, and any number not in the canonical wire form (see {@link #numberError}).
- * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files): it has no depth cap.
+ * {@link #parseLenient} accepts any RFC 8259 text and is ONLY for trusted fixtures (conformance files): it has no fixed depth cap; a document that overflows the stack is refused like any other.
  */
 public final class Json {
     private Json() {}
@@ -69,6 +69,13 @@ public final class Json {
         return null;
     }
 
+    /** The reference spells these two refusals with an explanation. */
+    private static String refText(String e) {
+        if (e.equals("integer outside the safe range")) return e + " (|n| > 2^53-1)";
+        if (e.equals("non-integer magnitude below 1e-6")) return e + " (needs an exponent form; not representable in the canonical decimal form)";
+        return e;
+    }
+
     /** True iff the value is a strict-profile safe integer (a {@link Num} integer lexeme, Integer or Long). */
     public static boolean isSafeInt(Object o) {
         if (o instanceof Num) {
@@ -109,12 +116,36 @@ public final class Json {
         return false;
     }
 
+    /** A strict-profile parse refusal: the message names the deviation and its offset, {@code offset} is the position (UTF-16 units). */
+    public static final class StrictJsonError extends IllegalArgumentException {
+        private static final long serialVersionUID = 1L;
+        public final int offset;
+        public StrictJsonError(String message, int offset) { super(message); this.offset = offset; }
+    }
+
     // ---- parser ----
     /** STRICT profile. Throws IllegalArgumentException on any deviation. */
     public static Object parse(String s) { return new Parser(s, true).top(); }
 
+    /** {@code JSON.parse} that refuses a duplicate member anywhere (third-party signed JSON: a duplicate check only, no canonical-number or surrogate rule). */
+    public static Object parseNoDuplicates(String s) {
+        try {
+            Parser p = new Parser(s, false);
+            p.noDup = true;
+            return p.top();
+        } catch (StackOverflowError e) {
+            throw new IllegalArgumentException("JSON nesting too deep");
+        }
+    }
+
     /** Lenient RFC 8259 (fixtures only): duplicate keys / lone surrogates / any number allowed. */
-    public static Object parseLenient(String s) { return new Parser(s, false).top(); }
+    public static Object parseLenient(String s) {
+        try {
+            return new Parser(s, false).top();
+        } catch (StackOverflowError e) { // no fixed cap (JSON.parse has none), but a deep document is an ordinary refusal for every caller
+            throw new IllegalArgumentException("JSON nesting too deep");
+        }
+    }
 
     private static boolean dig(char c) { return c >= '0' && c <= '9'; }
 
@@ -122,6 +153,8 @@ public final class Json {
         final String s;
         final boolean strict;
         int i = 0;
+        /** Refuses a duplicate member while every other rule stays lenient ({@link Json#parseNoDuplicates}). */
+        boolean noDup;
         Parser(String s, boolean strict) { this.s = s; this.strict = strict; }
 
         Object top() {
@@ -141,7 +174,7 @@ public final class Json {
             }
         }
 
-        IllegalArgumentException err(String m) { return new IllegalArgumentException(m + " at " + i); }
+        IllegalArgumentException err(String m) { return new StrictJsonError(m + " at " + i, i); }
 
         Object value(int depth) {
             if (i >= s.length()) throw err("unexpected end");
@@ -171,6 +204,7 @@ public final class Json {
                 ws();
                 if (i >= s.length() || s.charAt(i) != '"') throw err("expected key");
                 String k = string();
+                if (noDup && m.containsKey(k)) throw new IllegalArgumentException("duplicate key " + canonicalize(k)); // the reference's wording: duplicate key "k"
                 if (strict && m.containsKey(k)) throw err("duplicate key");
                 ws();
                 if (i >= s.length() || s.charAt(i) != ':') throw err("expected ':'");
@@ -291,10 +325,19 @@ public final class Json {
         return sb.toString();
     }
 
-    /** Bytewise UTF-8 comparison of two strings (== Unicode code point order). */
-    static int compareUtf8(String a, String b) {
-        return Arrays.compareUnsigned(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+    private static final java.util.regex.Pattern LONE_SURROGATE = java.util.regex.Pattern.compile("[\\uD800-\\uDFFF]"); // a pair is one code point, so only a lone one matches
+
+    /**
+     * Bytewise UTF-8 comparison of two strings (== Unicode code point order), as the reference's compareUtf8: a lone surrogate encodes as
+     * U+FFFD (Java's encoder writes '?'), and equal bytes (only lone surrogates can do that) fall back to UTF-16 code-unit order.
+     */
+    public static int compareUtf8(String a, String b) {
+        int d = Arrays.compareUnsigned(utf8(a), utf8(b));
+        return d != 0 ? d : a.compareTo(b);
     }
+
+    /** UTF-8 as the reference TextEncoder writes it: a lone surrogate becomes U+FFFD (String.getBytes writes '?'). */
+    public static byte[] utf8(String s) { return LONE_SURROGATE.matcher(s).replaceAll("\uFFFD").getBytes(StandardCharsets.UTF_8); }
 
     private static void jsString(StringBuilder sb, String s, boolean strict) {
         if (strict && hasLoneSurrogate(s)) throw new IllegalArgumentException("canonicalize: lone surrogate in string");
@@ -315,16 +358,16 @@ public final class Json {
                     } else if (Character.isHighSurrogate(c)) {
                         if (i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1))) {
                             sb.append(c).append(s.charAt(++i));
-                        } else sb.append('�');
+                        } else sb.append(String.format("\\u%04x", (int) c)); // JSON.stringify: a lone surrogate is escaped
                     } else if (Character.isLowSurrogate(c)) {
-                        sb.append('�'); // lenient only (strict rejected above)
+                        sb.append(String.format("\\u%04x", (int) c)); // lenient only (strict rejected above)
                     } else sb.append(c);
             }
         }
         sb.append('"');
     }
 
-    /** Lenient number formatting: canonical lexemes are already the shortest round-trip form. */
+    /** Lenient number formatting: JavaScript's String(n) of the double the lexeme reads as (canonical lexemes already are that text). */
     static String fmtNumber(String raw) {
         if (numberError(raw) == null) return raw;
         double f;
@@ -332,8 +375,26 @@ public final class Json {
             throw new IllegalArgumentException("canonicalize: non-finite number");
         }
         if (Double.isInfinite(f) || Double.isNaN(f)) throw new IllegalArgumentException("canonicalize: non-finite number");
-        if (f == 0) return "0";
-        return new BigDecimal(Double.toString(f)).stripTrailingZeros().toPlainString();
+        return AttestCommon.jsNumString(f); // exponent form at >= 1e21 and < 1e-6 (1e+21, 1e-7); -0 prints "0"
+    }
+
+    /**
+     * The shortest decimal that reads back as {@code a} (finite, &gt; 0); among equally short ones the closest to its exact value,
+     * a tie to the even last digit (ECMA-262 Number::toString). Double.toString is not shortest before JDK 19.
+     */
+    static BigDecimal shortest(double a) {
+        BigDecimal x = new BigDecimal(a);
+        for (int p = 1; ; p++) {
+            BigDecimal lo = x.round(new java.math.MathContext(p, java.math.RoundingMode.FLOOR));
+            BigDecimal hi = x.round(new java.math.MathContext(p, java.math.RoundingMode.CEILING));
+            boolean okLo = lo.doubleValue() == a, okHi = hi.doubleValue() == a;
+            if (okLo && okHi) {
+                int c = hi.subtract(x).compareTo(x.subtract(lo));
+                return (c < 0 || c == 0 && !hi.unscaledValue().testBit(0) ? hi : lo).stripTrailingZeros();
+            }
+            if (okLo) return lo.stripTrailingZeros();
+            if (okHi) return hi.stripTrailingZeros();
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -345,11 +406,11 @@ public final class Json {
             String raw = ((Num) v).raw;
             if (strict) {
                 String e = numberError(raw);
-                if (e != null) throw new IllegalArgumentException("canonicalize: " + e);
+                if (e != null) throw new IllegalArgumentException("canonicalize: " + refText(e));
                 sb.append(raw);
             } else sb.append(fmtNumber(raw));
         } else if (v instanceof Integer || v instanceof Long) {
-            if (strict && !isSafeInt(v)) throw new IllegalArgumentException("canonicalize: integer outside the safe range");
+            if (strict && !isSafeInt(v)) throw new IllegalArgumentException("canonicalize: " + refText("integer outside the safe range"));
             sb.append(v.toString());
         } else if (v instanceof List) {
             if (depth > (strict ? MAX_DEPTH : MAX_LENIENT_DEPTH)) throw new IllegalArgumentException("canonicalize: nesting too deep");
@@ -377,5 +438,51 @@ public final class Json {
             }
             sb.append('}');
         } else throw new IllegalArgumentException("canonicalize: unsupported type " + v.getClass());
+    }
+
+    /**
+     * {@code JSON.stringify}: compact text keeping the map's own key order (an insertion-ordered map writes in that order),
+     * numbers as JavaScript prints them, a non-finite number as {@code null}. The canonical forms above sort keys; this one does not.
+     */
+    @SuppressWarnings("unchecked")
+    public static String stringify(Object v) {
+        StringBuilder sb = new StringBuilder();
+        stringify(sb, v);
+        return sb.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void stringify(StringBuilder sb, Object v) {
+        if (v == null) sb.append("null");
+        else if (v instanceof Boolean) sb.append(((Boolean) v) ? "true" : "false");
+        else if (v instanceof String) jsString(sb, (String) v, false);
+        else if (v instanceof Num) sb.append(fmtNumber(((Num) v).raw));
+        else if (v instanceof Integer || v instanceof Long) sb.append(v.toString());
+        else if (v instanceof Number) {
+            double d = ((Number) v).doubleValue();
+            if (Double.isNaN(d) || Double.isInfinite(d)) sb.append("null");
+            else if (d == Math.rint(d) && Math.abs(d) < 1e15) sb.append(d == 0 ? "0" : Long.toString((long) d));
+            else sb.append(fmtNumber(BigDecimal.valueOf(d).toPlainString()));
+        } else if (v instanceof List) {
+            sb.append('[');
+            boolean first = true;
+            for (Object x : (List<Object>) v) {
+                if (!first) sb.append(',');
+                first = false;
+                stringify(sb, x);
+            }
+            sb.append(']');
+        } else if (v instanceof Map) {
+            sb.append('{');
+            boolean first = true;
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) v).entrySet()) {
+                if (!first) sb.append(',');
+                first = false;
+                jsString(sb, e.getKey(), false);
+                sb.append(':');
+                stringify(sb, e.getValue());
+            }
+            sb.append('}');
+        } else throw new IllegalArgumentException("stringify: unsupported type " + v.getClass());
     }
 }

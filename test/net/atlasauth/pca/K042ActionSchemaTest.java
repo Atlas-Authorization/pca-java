@@ -32,14 +32,8 @@ public class K042ActionSchemaTest {
     /** A raw JSON input as the verifier sees it. */
     static Object j(Object raw) { return IntentJs.normalize(Json.parseLenient((String) raw)); }
 
-    /** The Java spelling of a TS value-domain reason (Java omits the bound in four reasons). */
-    static String javaReason(String ts) {
-        if (ts == null) return null;
-        return ts.replaceAll("longer than \\d+ UTF-8 bytes$", "longer than the declared max_len")
-            .replaceAll("below min -?\\d+$", "below min")
-            .replaceAll("above max -?\\d+$", "above max")
-            .replaceAll("array items must be strings of at most \\d+ UTF-8 bytes$", "array items must be strings within max_len UTF-8 bytes");
-    }
+    /** The reference's reason, verbatim. */
+    static String javaReason(String ts) { return ts; }
 
     static void report(List<String> bad, int n) {
         if (!bad.isEmpty()) fail(bad.size() + "/" + n + " mismatches:\n" + String.join("\n", bad.subList(0, Math.min(bad.size(), 60))));
@@ -68,7 +62,7 @@ public class K042ActionSchemaTest {
         d.put("state", j("[-0]"));
         assertEquals("malformed schema: canonicalize: negative zero is not allowed", ActionSchema.shapeError(d));
         d.put("state", j("[1e21]"));
-        assertEquals("malformed schema: canonicalize: integer outside the safe range", ActionSchema.shapeError(d));
+        assertEquals("malformed schema: canonicalize: integer outside the safe range (|n| > 2^53-1)", ActionSchema.shapeError(d));
     }
 
     static Object cases0(String name) {

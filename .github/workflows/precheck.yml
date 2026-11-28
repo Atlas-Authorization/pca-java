@@ -1,0 +1,76 @@
+name: Precheck
+
+# Compile-only gate, mvn test-compile (main and test sources) for the core library, every adapter and the example server.
+# Runs only on pre/** pushes (and by hand): it builds and typechecks everything, tests included, and runs no test.
+# Push pre/<version> first and the full ci/** run only when this is green.
+on:
+  push:
+    branches: ['pre/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  precheck:
+    name: compile main and test sources (no test runs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source layout (full shared corpus from the flagship)
+        shell: bash
+        run: .github/scripts/fetch-flagship-corpus.sh --mono java-pca
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # install -DskipTests compiles main and test sources and skips only the test run; the adapters resolve the core from the local repository
+      - name: Core library (main and test sources, installed for the adapters)
+        id: c0
+        continue-on-error: true
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: mvn -B -ntp -q install -DskipTests
+      - name: Every adapter (jars installed in dependency order, then test-compile)
+        id: c1
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          rc=0
+          # adapters depend on each other (pca-ai-core, pca-spring-security): install every main jar first, in that order, without
+          # test sources, so a test compile error in one adapter does not hide the others
+          ordered="adapters/pca-ai-core/pom.xml adapters/pca-spring-security/pom.xml $(ls adapters/*/pom.xml | grep -v -e pca-ai-core -e pca-spring-security | tr '\n' ' ')"
+          for pom in $ordered; do
+            [ -f "$pom" ] || continue
+            mvn -B -ntp -q -f "$pom" install -Dmaven.test.skip=true || { echo "::error::$pom main sources failed"; rc=1; }
+          done
+          for pom in $ordered; do
+            [ -f "$pom" ] || continue
+            echo "::group::$pom"
+            mvn -B -ntp -q -f "$pom" test-compile || { echo "::error::$pom failed"; rc=1; }
+            echo "::endgroup::"
+          done
+          exit $rc
+      - name: Example server
+        id: c2
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ env.PCA_MONO_SDK }}
+        run: |
+          [ -f examples/spring-boot-server/pom.xml ] || { echo "skip (absent in this tree)"; exit 0; }
+          mvn -B -ntp -q -f examples/spring-boot-server/pom.xml test-compile
+      # every check above runs even when an earlier one failed; this step makes the job red when any did
+      - name: Summary
+        if: ${{ always() && (steps.c0.outcome == 'failure' || steps.c1.outcome == 'failure' || steps.c2.outcome == 'failure') }}
+        run: |
+          echo "::error::one or more compile checks failed; each failing step above has the details"
+          exit 1

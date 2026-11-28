@@ -22,17 +22,39 @@ public final class IntentRevocation {
     public static final String REVEPOCH_DOMAIN = "atlas-pca/revepoch/v1\0";
     private static final byte[] REVSET_PREFIX = "pca-revset/v1\0".getBytes(StandardCharsets.UTF_8);
 
+    /**
+     * The exposure window of an honest publisher: an action verified at {@code now} can rely on an epoch that predates a revocation at
+     * {@code tRevoked} only while {@code now <= tRevoked + maxAgeMs + skewMs}. Returns that bound.
+     */
+    public static double revocationExposureEnd(double tRevoked, double maxAgeMs, double skewMs) { return tRevoked + maxAgeMs + skewMs; }
+
+    public static double revocationExposureEnd(double tRevoked, double maxAgeMs) { return revocationExposureEnd(tRevoked, maxAgeMs, 60_000); }
+
     public static String sessionRevocationId(String session) { return "pca-intent:session:" + session; }
     public static String mapRevocationId(String mapDigest) { return "pca-intent:map:" + mapDigest; }
     public static String deltaRevocationId(String grantId) { return "pca-intent:delta:" + grantId; }
     public static String profileRevocationId(String profile, String version) { return "pca-intent:profile:" + profile + "@" + version; }
     public static String sessionRevocationScope(String session) { return "pca-intent-session:" + session; }
 
+    /** The {@code grant_ref} of a profile's revocation epoch (the owner publishes it at {@code revocation.epoch_uri}). */
+    public static String profileRevocationScope(String profileId) { return "pca-intent-profile:" + profileId; }
+
+    /** Default max epoch age in seconds by tier: 60 s for payment tiers, 300 s otherwise. */
+    public static final Map<String, Integer> DEFAULT_REVOCATION_MAX_AGE_S;
+    static {
+        Map<String, Integer> m = new java.util.LinkedHashMap<>();
+        m.put("payment", 60);
+        m.put("default", 300);
+        DEFAULT_REVOCATION_MAX_AGE_S = java.util.Collections.unmodifiableMap(m);
+    }
+
     /** JavaScript template-literal text of a JSON value ({@code `${x}`}). */
     static String jsText(Object x, boolean present) {
         if (!present) return "undefined";
         if (x == null) return "null";
-        if (x instanceof Json.Num) return ((Json.Num) x).raw.equals("-0") ? "0" : ((Json.Num) x).raw;
+        // JavaScript String(n) of the parsed double: 1e21 and above, and below 1e-6, print in exponent form.
+        if (x instanceof Json.Num) return IntentHistory.jsString(Double.parseDouble(((Json.Num) x).raw));
+        if (x instanceof Number) return IntentHistory.jsString(((Number) x).doubleValue());
         if (x instanceof List || x instanceof Map) return x instanceof List ? listText((List<?>) x) : "[object Object]";
         return String.valueOf(x);
     }
@@ -121,7 +143,7 @@ public final class IntentRevocation {
             if (!IntentJs.verifyPinnedSuite(ep.get("alg"), ep.containsKey("alg"), guardian, ep.get("pq_pk"), msg, ep.get("sig"), ep.get("pq_sig"), pqPins))
                 return "revocation epoch signature invalid";
             if (!grantRef.equals(ep.get("grant_ref"))) return "revocation epoch is for a different grant";
-            if (!(now <= IntentJs.num(ep.get("not_after")))) return "revocation epoch expired (stale revocation root)";
+            if (!(Double.isFinite(now) && now <= IntentJs.num(ep.get("not_after")))) return "revocation epoch expired (stale revocation root)";
             if (!(IntentJs.num(ep.get("issued_at")) <= now + 60_000)) return "revocation epoch issued in the future";
             return null;
         } catch (RuntimeException e) {
@@ -183,7 +205,7 @@ public final class IntentRevocation {
     }
 
     /** The parameters of {@code primitives.intent_revocation}; every other input member belongs to the (closed) evidence. */
-    static final List<String> PRIMITIVE_PARAMS = List.of("session", "scope", "authority", "ids", "now", "max_age_ms", "last");
+    static final List<String> PRIMITIVE_PARAMS = NullSafe.list(List.of("session", "scope", "authority", "ids", "now", "max_age_ms", "last"));
 
     /**
      * The {@code primitives.intent_revocation} entry point: {@code {epoch, revoked, session, authority, ids, now, max_age_ms,

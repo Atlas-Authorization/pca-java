@@ -19,6 +19,9 @@ public final class IntentClassifier {
     public static final String INTENT_CLASSIFIER_DOMAIN = "atlas-pca/intent-classifier/v1\0";
     public static final String INTENT_CLASSIFIER_REF_DOMAIN = "atlas-pca/intent-classifier-ref/v1";
     public static final int MAX_COMMITTED_CLASSES = 8;
+
+    /** The content digest a verdict binds (the reference's {@code classifierContentDigest}): {@code b64u(sha256(strictCanonical(value)))}. */
+    public static String classifierContentDigest(Object value) { return IntentJs.hashCanonical(value); }
     public static final int MAX_CLASSIFIER_LABELS = 32;
 
     /** The rule-18 verdict: {@code classes} maps each classifier id to its quorum label. */
@@ -26,6 +29,8 @@ public final class IntentClassifier {
         public final boolean ok;
         public final String reason;
         public final Map<String, Object> classes;
+        /** The tally behind the verdict: {classifier id: {label: number of distinct judges}} (null on a denial). */
+        public Map<String, Object> votes;
         ClassResult(boolean ok, String reason, Map<String, Object> classes) { this.ok = ok; this.reason = reason; this.classes = classes; }
         static ClassResult fail(String reason) { return new ClassResult(false, "classes: " + reason, null); }
     }
@@ -95,7 +100,9 @@ public final class IntentClassifier {
     /** The {@code primitives.intent_classifier} entry point: normalizes {@code input}, then {@link #decide(Map)}. */
     public static ClassResult decide(Object input) {
         try {
-            return decide(IntentJs.obj(IntentJs.normalize(input)));
+            Object n = IntentJs.normalize(input);
+            if (!(n instanceof Map)) return ClassResult.fail("input must be an object");
+            return decide(IntentJs.obj(n));
         } catch (RuntimeException e) {
             return ClassResult.fail("evaluation error (fail closed): " + e.getClass().getSimpleName());
         }
@@ -159,7 +166,14 @@ public final class IntentClassifier {
                 if (winners.size() > 1) return ClassResult.fail("classifier '" + id + "': ambiguous, " + winners.size() + " labels reach the quorum");
                 classes.put(id, winners.get(0));
             }
-            return new ClassResult(true, null, classes);
+            ClassResult ok = new ClassResult(true, null, classes);
+            ok.votes = new LinkedHashMap<>();
+            for (Map.Entry<String, Map<String, Integer>> e : votes.entrySet()) {
+                Map<String, Object> t = new LinkedHashMap<>();
+                for (Map.Entry<String, Integer> l : e.getValue().entrySet()) t.put(l.getKey(), IntentJs.ofLong(l.getValue()));
+                ok.votes.put(e.getKey(), t);
+            }
+            return ok;
         } catch (RuntimeException e) {
             return ClassResult.fail("evaluation error (fail closed): " + e.getClass().getSimpleName());
         }

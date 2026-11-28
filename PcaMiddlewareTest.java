@@ -75,7 +75,7 @@ public class PcaMiddlewareTest {
 
         // --- Test 1: valid header -> chain continues + attribute set ---
         {
-            PcaFilter filter = new PcaFilter(aud, resolver, clock);
+            PcaFilter filter = PcaFilter.signatureOnly(aud, resolver, clock);
             MockHttpServletRequest req = new MockHttpServletRequest();
             req.addHeader("PCA-Action", header(pcactnJson));
             MockHttpServletResponse resp = new MockHttpServletResponse();
@@ -96,7 +96,7 @@ public class PcaMiddlewareTest {
 
         // --- Test 2: no header (and no body) -> 401 + WWW-Authenticate, chain does NOT continue ---
         {
-            PcaFilter filter = new PcaFilter(aud, resolver, clock);
+            PcaFilter filter = PcaFilter.signatureOnly(aud, resolver, clock);
             MockHttpServletRequest req = new MockHttpServletRequest();
             MockHttpServletResponse resp = new MockHttpServletResponse();
             MockFilterChain chain = new MockFilterChain();
@@ -111,7 +111,7 @@ public class PcaMiddlewareTest {
 
         // --- Test 3: unknown grant -> 401 ---
         {
-            PcaFilter filter = new PcaFilter(aud, emptyResolver, clock);
+            PcaFilter filter = PcaFilter.signatureOnly(aud, emptyResolver, clock);
             MockHttpServletRequest req = new MockHttpServletRequest();
             req.addHeader("PCA-Action", header(pcactnJson));
             MockHttpServletResponse resp = new MockHttpServletResponse();
@@ -126,7 +126,7 @@ public class PcaMiddlewareTest {
 
         // --- Test 4: wrong audience -> 403 (denying verdict) ---
         {
-            PcaFilter filter = new PcaFilter("rs-wrong-audience", resolver, clock);
+            PcaFilter filter = PcaFilter.signatureOnly("rs-wrong-audience", resolver, clock);
             MockHttpServletRequest req = new MockHttpServletRequest();
             req.addHeader("PCA-Action", header(pcactnJson));
             MockHttpServletResponse resp = new MockHttpServletResponse();
@@ -142,7 +142,7 @@ public class PcaMiddlewareTest {
 
         // --- Test 5 (bonus): body transport {"pcactn":...} -> continues + body re-readable downstream ---
         {
-            PcaFilter filter = new PcaFilter(aud, resolver, clock);
+            PcaFilter filter = PcaFilter.signatureOnly(aud, resolver, clock);
             MockHttpServletRequest req = new MockHttpServletRequest();
             byte[] body = ("{\"pcactn\":" + pcactnJson + "}").getBytes(StandardCharsets.UTF_8);
             req.setContent(body);
@@ -161,7 +161,7 @@ public class PcaMiddlewareTest {
 
         // --- Test 6 (bonus): Spring interceptor, valid header -> true + attribute set ---
         {
-            PcaInterceptor interceptor = new PcaInterceptor(aud, resolver, clock);
+            PcaInterceptor interceptor = PcaInterceptor.signatureOnly(aud, resolver, clock);
             MockHttpServletRequest req = new MockHttpServletRequest();
             req.addHeader("PCA-Action", header(pcactnJson));
             MockHttpServletResponse resp = new MockHttpServletResponse();
@@ -170,7 +170,7 @@ public class PcaMiddlewareTest {
             check(req.getAttribute("pca") instanceof PcaResult, "interceptor valid header: 'pca' attribute set");
 
             // and denies on wrong audience
-            PcaInterceptor bad = new PcaInterceptor("rs-wrong-audience", resolver, clock);
+            PcaInterceptor bad = PcaInterceptor.signatureOnly("rs-wrong-audience", resolver, clock);
             MockHttpServletRequest req2 = new MockHttpServletRequest();
             req2.addHeader("PCA-Action", header(pcactnJson));
             MockHttpServletResponse resp2 = new MockHttpServletResponse();
@@ -203,7 +203,7 @@ public class PcaMiddlewareTest {
             // a genuine PCActn header is refused once it carries whitespace or padding (nothing is trimmed or normalized)
             String good = header(pcactnJson);
             for (String bad : new String[] {good + " ", " " + good, good + "\t", good + "=", good.replace('-', '+').replace('_', '/'), "   "}) {
-                PcaFilter filter = new PcaFilter(aud, resolver, clock);
+                PcaFilter filter = PcaFilter.signatureOnly(aud, resolver, clock);
                 MockHttpServletRequest req = new MockHttpServletRequest();
                 req.addHeader("PCA-Action", bad);
                 MockHttpServletResponse resp = new MockHttpServletResponse();
